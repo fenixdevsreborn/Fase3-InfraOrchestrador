@@ -1,0 +1,86 @@
+# ------------------------------------------------------------------------------
+# Terraform Destroy — execução manual com confirmação explícita
+# Exige que o usuário digite o valor de confirmação para evitar destruição acidental.
+# ------------------------------------------------------------------------------
+
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente a destruir (prod, staging, demo)'
+        required: true
+        type: choice
+        options:
+          - prod
+          - staging
+          - demo
+        default: prod
+      confirm_destroy:
+        description: 'Digite exatamente DESTROY (maiúsculo) para confirmar. Qualquer outro valor cancela e nenhum recurso é alterado.'
+        required: true
+        type: string
+
+env:
+  TF_INPUT: false
+  TF_IN_AUTOMATION: true
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    # Só executa se a confirmação for exatamente "DESTROY" (proteção contra execução acidental)
+    if: inputs.confirm_destroy == 'DESTROY'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_TERRAFORM }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -no-color
+        env:
+          TF_VAR_environment: ${{ inputs.environment }}
+
+      - name: Terraform Destroy
+        id: destroy
+        run: |
+          terraform destroy -no-color -auto-approve 2>&1 | tee destroy.log
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_postgres_master_password: ${{ secrets.TF_VAR_POSTGRES_MASTER_PASSWORD }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Terraform Destroy — ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Exit code:** ${{ steps.destroy.outputs.exitcode }}" >> $GITHUB_STEP_SUMMARY
+
+  # Job que roda quando a confirmação NÃO foi digitada corretamente
+  cancelled:
+    name: Destroy não confirmado
+    runs-on: ubuntu-latest
+    if: inputs.confirm_destroy != 'DESTROY'
+    steps:
+      - name: Ação cancelada
+        run: |
+          echo "## Destroy cancelado" >> $GITHUB_STEP_SUMMARY
+          echo "Você não digitou **DESTROY** no campo de confirmação. Nenhum recurso foi alterado." >> $GITHUB_STEP_SUMMARY
+          echo "Para executar o destroy, rode o workflow novamente e digite exatamente \`DESTROY\` (maiúsculo) no campo **confirm_destroy**." >> $GITHUB_STEP_SUMMARY

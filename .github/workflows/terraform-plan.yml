@@ -1,0 +1,93 @@
+# ------------------------------------------------------------------------------
+# Terraform Plan — execução manual
+# Roda init, validate e plan; salva o plano como artifact para revisão.
+# ------------------------------------------------------------------------------
+
+name: Terraform Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente (prod, staging, demo)'
+        required: true
+        type: choice
+        options:
+          - prod
+          - staging
+          - demo
+        default: prod
+
+env:
+  TF_INPUT: false
+  TF_IN_AUTOMATION: true
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_TERRAFORM }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -no-color
+        env:
+          TF_VAR_environment: ${{ inputs.environment }}
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          if [ -f image_tags.auto.tfvars ]; then
+            terraform plan -no-color -out=tfplan -var-file=image_tags.auto.tfvars 2>&1 | tee plan.log
+          else
+            terraform plan -no-color -out=tfplan 2>&1 | tee plan.log
+          fi
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_postgres_master_password: ${{ secrets.TF_VAR_POSTGRES_MASTER_PASSWORD }}
+        continue-on-error: true
+
+      - name: Plan (human-readable) output
+        if: success() || steps.plan.outputs.exitcode == '2'
+        run: terraform show -no-color tfplan 2>/dev/null > plan.txt || true
+
+      - name: Upload plan artifact
+        if: success() || steps.plan.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}-${{ github.run_id }}
+          path: |
+            tfplan
+            plan.txt
+            plan.log
+          retention-days: 5
+          if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Terraform Plan — ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Exit code:** ${{ steps.plan.outputs.exitcode }}" >> $GITHUB_STEP_SUMMARY
+          echo "0 = no changes, 1 = error, 2 = changes present" >> $GITHUB_STEP_SUMMARY
