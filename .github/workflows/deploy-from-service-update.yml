@@ -65,8 +65,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_TERRAFORM }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-        continue-on-error: true
-        # Se não usar OIDC, configure AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY nos secrets do repo
 
       - name: Normalize payload (repository_dispatch vs workflow_call)
         id: payload
@@ -130,12 +128,12 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.0"
+          terraform_version: "1.9.0"
           terraform_wrapper: false
 
       - name: Terraform Init
         id: init
-        run: terraform init -no-color
+        run: terraform init -no-color -backend-config=environments/${{ steps.vars.outputs.environment }}/backend.hcl
         env:
           TF_VAR_environment: ${{ steps.vars.outputs.environment }}
 
@@ -149,6 +147,7 @@ jobs:
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         env:
           TF_VAR_environment: ${{ steps.vars.outputs.environment }}
+          TF_VAR_postgres_master_password: ${{ secrets.TF_VAR_POSTGRES_MASTER_PASSWORD }}
         continue-on-error: true
 
       - name: Terraform Apply

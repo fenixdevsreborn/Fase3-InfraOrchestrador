@@ -71,3 +71,12 @@ Este documento registra as decisões explícitas tomadas para a infraestrutura A
 | CloudWatch Logs    | Por GB ingerido/arquivado    |
 
 **Total estimado (ambiente prod simples, pouco tráfego):** ~US$ 25–40/mês. Reduzir a zero: `terraform destroy` e desativar recursos que não tenham custo quando ociosos.
+
+---
+
+## 7. ECR e runtimes: quem consome as imagens hoje
+
+**Decisão documentada:** Os repositórios ECR são criados para quatro serviços (notification-lambda, users-api, games-api, payments-api). Hoje, **apenas a Notification Lambda** tem um recurso Terraform que consome a imagem (Lambda com `package_type = Image` e referência ao ECR). As variáveis `ecr_image_tag_users_api`, `ecr_image_tag_games_api` e `ecr_image_tag_payments_api` existem para manter o mesmo padrão de atualização via orquestrador e para **preparação para futuro**; nenhum recurso (ECS, Fargate, Lambda) usa essas três imagens ainda.
+
+- **Implicação:** O fluxo "serviço faz push → orquestrador atualiza tfvars → terraform apply" atualiza apenas a Lambda de notificação quando o serviço é notification-lambda. Para users/games/payments, o apply apenas persiste a tag no state; não há deploy de container até que um runtime (ex.: ECS Fargate ou mais Lambdas container) seja adicionado ao Terraform.
+- **Próximo passo (quando for deployar as APIs containerizadas):** Definir destino explícito (ex.: ECS Fargate service ou Lambda por API) e conectar as variáveis de tag aos recursos correspondentes. Não inventar ECS neste repositório até que seja decisão de arquitetura aprovada.

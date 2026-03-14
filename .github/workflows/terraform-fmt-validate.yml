@@ -1,0 +1,50 @@
+# ------------------------------------------------------------------------------
+# Terraform fmt e validate — PR/push
+# Garante estilo e configuração válida antes de plan/apply.
+# ------------------------------------------------------------------------------
+
+name: Terraform fmt & validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '.github/workflows/terraform-fmt-validate.yml'
+  pull_request:
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '.github/workflows/terraform-fmt-validate.yml'
+
+env:
+  TF_INPUT: false
+  TF_IN_AUTOMATION: true
+
+jobs:
+  fmt-validate:
+    name: fmt & validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+          terraform_wrapper: false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive -diff
+        working-directory: .
+
+      - name: Terraform Init (root)
+        run: terraform init -backend=false -no-color
+
+      - name: Terraform Validate
+        run: terraform validate -no-color

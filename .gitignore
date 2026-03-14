@@ -361,3 +361,26 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ------------------------------------------------------------------------------
+# Terraform (FCG Infra Orchestrator)
+# ------------------------------------------------------------------------------
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+!terraform.tfvars.example
+!image_tags.auto.tfvars.example
+!environments/**/terraform.tfvars
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*.tfplan
+plan.log
+apply.log
+destroy.log
+plan.txt

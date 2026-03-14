@@ -80,11 +80,11 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.0"
+          terraform_version: "1.9.0"
           terraform_wrapper: false
 
       - name: Terraform Init
-        run: terraform init -no-color
+        run: terraform init -no-color -backend-config=environments/${{ inputs.environment }}/backend.hcl
         env:
           TF_VAR_environment: ${{ inputs.environment }}
 

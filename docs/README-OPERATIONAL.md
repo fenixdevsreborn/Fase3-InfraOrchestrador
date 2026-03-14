@@ -242,7 +242,7 @@ OIDC permite que o GitHub Actions **assuma uma IAM Role** na AWS sem precisar de
 
 | Situação | O que pode ser | O que fazer |
 |----------|----------------|-------------|
-| **Terraform plan/apply falha com “failed to get existing workspace”** | Backend S3 não configurado ou inacessível. | Configurar `backend.tf` (bucket, key, region, dynamodb_table). Garantir que a role OIDC do orquestrador tem permissão no bucket e na tabela DynamoDB. |
+| **Terraform plan/apply falha com “failed to get existing workspace”** | Backend S3 não configurado ou inacessível. | Preencher `environments/<env>/backend.hcl`; rodar o bootstrap se necessário. Garantir que a role OIDC tem permissão no bucket e na tabela DynamoDB. Ver [BOOTSTRAP.md](BOOTSTRAP.md). |
 | **“Error acquiring the state lock”** | Outra run (ou alguém local) está com o state travado. | Esperar a outra execução terminar ou, se for seguro, remover o lock na tabela DynamoDB (cuidado em time). |
 | **Push para ECR falha com “no basic auth credentials”** | Login no ECR falhou (role sem permissão ou região errada). | Verificar `AWS_ROLE_ARN_ECR`, região e permissões da role (ecr:GetAuthorizationToken e ecr:PutImage, etc.). |
 | **“Repository not found” ou 404 no ECR** | Nome do repositório diferente do que existe na AWS. | Conferir variable `ECR_REPOSITORY_NAME` no repo do serviço; deve ser igual ao nome do repositório criado pelo Terraform (ex.: output `ecr_repository_urls`). |
@@ -258,12 +258,12 @@ OIDC permite que o GitHub Actions **assuma uma IAM Role** na AWS sem precisar de
 Use esta lista antes de fazer o primeiro deploy.
 
 - [ ] **AWS:** Conta AWS ativa; região definida (ex.: us-east-1).
-- [ ] **Terraform state:** Bucket S3 e tabela DynamoDB criados para o backend remoto; `backend.tf` configurado (copiar de `backend.tf.example` e preencher).
+- [ ] **Terraform state:** Bucket S3 e tabela DynamoDB criados via `bootstrap/`; `environments/<env>/backend.hcl` preenchido para cada ambiente (ver [BOOTSTRAP.md](BOOTSTRAP.md)).
 - [ ] **OIDC na AWS:** Identity provider configurado (`token.actions.githubusercontent.com`); IAM Role criada com trust policy para o repositório do orquestrador; permissões da role suficientes para Terraform (S3, DynamoDB, EC2, Lambda, ECR, API Gateway, etc.).
 - [ ] **GitHub — orquestrador:** Secret `AWS_ROLE_ARN_TERRAFORM` com o ARN da role; variable `AWS_REGION` (opcional); se usar RDS, secret `TF_VAR_POSTGRES_MASTER_PASSWORD`.
 - [ ] **GitHub — cada serviço:** Secret `AWS_ROLE_ARN_ECR` (role com permissão ECR); secret `ORCHESTRATOR_REPO_TOKEN` (PAT para repository_dispatch); variables `ECR_REPOSITORY_NAME`, `ORCHESTRATOR_REPO`; opcionalmente `SERVICE_NAME`, `ENVIRONMENT`, `AWS_REGION`.
 - [ ] **Orquestrador:** Arquivo `image_tags.auto.tfvars` existe ou existe `image_tags.auto.tfvars.example` (o workflow pode criar a partir do exemplo).
-- [ ] **Terraform:** Pelo menos uma vez, rodar `terraform init` (local ou via workflow) para o backend e providers ficarem configurados.
+- [ ] **Terraform:** Pelo menos uma vez, rodar `terraform init -backend-config=environments/<env>/backend.hcl` (local ou via workflow) para o backend e providers ficarem configurados.
 
 ---
 

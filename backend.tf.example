@@ -1,16 +1,8 @@
-# Copie para backend.tf e preencha com seus valores.
-# Depois: terraform init -reconfigure
-
-# terraform {
-#   backend "s3" {
-#     bucket         = "fcg-terraform-state-SEU-ACCOUNT-ID"
-#     key            = "fcg-infra/terraform.tfstate"
-#     region         = "us-east-1"
-#     dynamodb_table = "fcg-terraform-locks"
-#     encrypt        = true
-#   }
-# }
-
-# Pré-requisitos (uma vez):
-# 1. Criar bucket S3 com versionamento e encryption
-# 2. Criar tabela DynamoDB com chave primária LockID (String)
+# Backend S3 é configurado por ambiente via -backend-config.
+# NÃO crie backend.tf; use os arquivos em environments/<env>/backend.hcl.
+#
+# 1. Rode o bootstrap: cd bootstrap && terraform apply
+# 2. Preencha environments/prod/backend.hcl (e staging/demo) com bucket e dynamodb_table
+# 3. Init: terraform init -backend-config=environments/prod/backend.hcl
+#
+# Ver: docs/BOOTSTRAP.md

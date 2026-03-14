@@ -1,0 +1,55 @@
+# ------------------------------------------------------------------------------
+# Bootstrap / backend config check — falha cedo se backend não estiver configurado
+# Valida que environments/<env>/backend.hcl existe e foi preenchido (sem placeholder).
+# ------------------------------------------------------------------------------
+
+name: Bootstrap / backend check
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente (prod, staging, demo)'
+        required: true
+        type: choice
+        options:
+          - prod
+          - staging
+          - demo
+        default: prod
+
+jobs:
+  check:
+    name: Backend config check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check backend.hcl exists
+        run: |
+          ENV="${{ inputs.environment }}"
+          FILE="environments/${ENV}/backend.hcl"
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Arquivo não encontrado: $FILE. Crie o arquivo a partir de environments/prod/backend.hcl ou rode o bootstrap."
+            exit 1
+          fi
+          echo "✅ $FILE existe"
+
+      - name: Check backend.hcl configured (no placeholder)
+        run: |
+          ENV="${{ inputs.environment }}"
+          FILE="environments/${ENV}/backend.hcl"
+          if grep -q "REPLACE-WITH-ACCOUNT-ID" "$FILE"; then
+            echo "::error::backend.hcl ainda contém placeholder. Preencha bucket e dynamodb_table com os outputs do bootstrap (cd bootstrap && terraform output -raw state_bucket_name)."
+            exit 1
+          fi
+          echo "✅ backend.hcl configurado para $ENV"
+
+      - name: Summary
+        run: |
+          echo "## Bootstrap check — ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Backend config em \`environments/${{ inputs.environment }}/backend.hcl\` está presente e configurado." >> $GITHUB_STEP_SUMMARY

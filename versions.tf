@@ -12,12 +12,7 @@ terraform {
     }
   }
 
-  # Backend remoto opcional: descomente e configure para persistir state
-  # backend "s3" {
-  #   bucket         = "fcg-terraform-state-REPLACE"
-  #   key            = "fcg-infra/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "fcg-terraform-locks"
-  #   encrypt        = true
-  # }
+  # Backend S3: parâmetros vêm de -backend-config=environments/<env>/backend.hcl
+  # Ex.: terraform init -backend-config=environments/prod/backend.hcl
+  backend "s3" {}
 }

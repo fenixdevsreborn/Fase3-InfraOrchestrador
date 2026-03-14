@@ -27,8 +27,8 @@ Lá você encontra:
 
 ### Setup inicial (antes do primeiro deploy)
 
-- [ ] AWS: conta ativa, região definida; bucket S3 e DynamoDB para state; `backend.tf` configurado
-- [ ] OIDC: Identity provider e IAM Role para o repo do orquestrador; secret `AWS_ROLE_ARN_TERRAFORM` no GitHub
+- [ ] **Bootstrap:** Rodar o Terraform em `bootstrap/` para criar bucket S3 e tabela DynamoDB; preencher `environments/<env>/backend.hcl` (ver [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md))
+- [ ] OIDC: Identity provider e IAM Role para o repo do orquestrador; secret `AWS_ROLE_ARN_TERRAFORM` no GitHub (ver [docs/OIDC.md](docs/OIDC.md))
 - [ ] Orquestrador: secrets `AWS_ROLE_ARN_TERRAFORM`, `TF_VAR_POSTGRES_MASTER_PASSWORD` (se RDS); variable `AWS_REGION` (opcional)
 - [ ] Cada serviço: `AWS_ROLE_ARN_ECR`, `ORCHESTRATOR_REPO_TOKEN`; variables `ECR_REPOSITORY_NAME`, `ORCHESTRATOR_REPO`
 
@@ -62,10 +62,14 @@ Detalhes e rollback: [docs/WORKFLOWS-OPERATION.md](docs/WORKFLOWS-OPERATION.md) 
 ## Objetivos e documentação técnica
 
 - **Objetivos:** provisionar infra na AWS (API Gateway, SQS, Lambda, ECR, S3, RDS, etc.) sem criar tudo no console; baixo acoplamento; destruição limpa.
+- **Arquitetura e fluxo:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Bootstrap (backend S3 + DynamoDB):** [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md)
+- **OIDC (GitHub ↔ AWS):** [docs/OIDC.md](docs/OIDC.md)
 - **Decisões de arquitetura:** [docs/DECISIONS.md](docs/DECISIONS.md)
 - **Deploy automático (serviço → orquestrador):** [docs/DEPLOY-FROM-SERVICE-UPDATE.md](docs/DEPLOY-FROM-SERVICE-UPDATE.md)
 - **Workflows manuais (plan/apply/destroy):** [docs/WORKFLOWS-OPERATION.md](docs/WORKFLOWS-OPERATION.md)
 - **Imagens e rollback:** [docs/IMAGES-AND-ROLLBACK.md](docs/IMAGES-AND-ROLLBACK.md)
+- **Erros comuns:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ## Pré-requisitos
 
@@ -76,15 +80,28 @@ Detalhes e rollback: [docs/WORKFLOWS-OPERATION.md](docs/WORKFLOWS-OPERATION.md) 
 
 ```
 Fase3-InfraOrchestrador/
-├── main.tf, variables.tf, outputs.tf, versions.tf, provider.tf
-├── backend.tf.example, terraform.tfvars.example, image_tags.auto.tfvars.example
+├── bootstrap/                  # Terraform do backend (S3 + DynamoDB); rodar uma vez
+├── environments/               # Backend e tfvars por ambiente
+│   ├── prod/   (backend.hcl, terraform.tfvars)
+│   ├── staging/
+│   └── demo/
+├── main.tf, variables.tf, outputs.tf, versions.tf, provider.tf, locals.tf
+├── terraform.tfvars.example, image_tags.auto.tfvars.example
+├── scripts/                    # plan.sh, apply.sh, destroy.sh, bootstrap.sh, validate.sh
+├── Makefile
 ├── .github/workflows/
-│   ├── terraform-plan.yml      # Plan manual
-│   ├── terraform-apply.yml     # Apply manual
-│   ├── terraform-destroy.yml   # Destroy manual (confirmação DESTROY)
-│   └── deploy-from-service-update.yml  # Deploy automático ao receber evento do serviço
+│   ├── terraform-fmt-validate.yml   # fmt + validate em PR/push
+│   ├── terraform-plan.yml
+│   ├── terraform-apply.yml
+│   ├── terraform-destroy.yml
+│   ├── deploy-from-service-update.yml
+│   └── bootstrap-check.yml          # Valida backend.hcl configurado
 ├── docs/
-│   ├── README-OPERATIONAL.md   # Guia operacional completo
+│   ├── README-OPERATIONAL.md
+│   ├── ARCHITECTURE.md
+│   ├── BOOTSTRAP.md
+│   ├── OIDC.md
+│   ├── TROUBLESHOOTING.md
 │   ├── WORKFLOWS-OPERATION.md
 │   ├── DEPLOY-FROM-SERVICE-UPDATE.md
 │   ├── IMAGES-AND-ROLLBACK.md
@@ -94,16 +111,17 @@ Fase3-InfraOrchestrador/
 
 ## Uso rápido (local)
 
+**Primeira vez:** rodar o [bootstrap](docs/BOOTSTRAP.md) e preencher `environments/<env>/backend.hcl`.
+
 ```bash
-cp backend.tf.example backend.tf   # preencher bucket, key, region, dynamodb_table
-cp terraform.tfvars.example terraform.tfvars
+export TF_VAR_environment=prod
 export TF_VAR_postgres_master_password="sua-senha"   # se usar RDS; não commitar
-terraform init -reconfigure
+terraform init -backend-config=environments/prod/backend.hcl
 terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
-Destruir: `terraform destroy` (ou use o workflow **Terraform Destroy** no GitHub com confirmação `DESTROY`).
+Ou use os scripts: `./scripts/plan.sh prod`, `./scripts/apply.sh prod`. Destruir: `./scripts/destroy.sh prod` (pede confirmação) ou workflow **Terraform Destroy** no GitHub com **confirm_destroy**: `DESTROY`.
 
 ## Variáveis principais
 
