@@ -41,12 +41,13 @@ Ou seja: o **build** da aplicação acontece no GitHub Actions do próprio repos
 
 1. O workflow **Publish image** do serviço usa **OIDC** para assumir uma **IAM Role** na AWS (secret `AWS_ROLE_ARN_ECR` no repositório do serviço). Com isso, não é necessário guardar access key no GitHub.
 2. O passo **Login to ECR** usa a ação `aws-actions/amazon-ecr-login`; o Actions obtém um token temporário e faz `docker login` no registro ECR.
-3. O **nome do repositório ECR** vem da variable `ECR_REPOSITORY_NAME` (ex.: `fcg-prod-users-api`). Esse nome deve ser o mesmo que o Terraform criou no orquestrador (output `ecr_repository_urls` ou nome do recurso).
-4. A imagem é construída e enviada com:
+3. **Região:** a variable `AWS_REGION` define a região do ECR. Se não estiver definida, o padrão é **`us-east-1`** (Virginia). Todos os workflows (UsersAPI, GamesAPI, PaymentsAPI, NotificationLambda) usam esse mesmo default.
+4. **Nome do repositório ECR:** vem da variable `ECR_REPOSITORY_NAME`. Se não estiver definida, o padrão é **`fcg/fase03`**. Para usar outro repositório (ex.: `fcg-prod-users-api`), defina a variable no repositório do serviço. O nome deve ser o mesmo que o Terraform criou no orquestrador (output `ecr_repository_urls` ou nome do recurso).
+5. A imagem é construída e enviada com:
    - **Tag principal:** SHA curto do commit (ex.: `a1b2c3d`)
    - **Tag `latest`:** apenas em ambiente prod (configurável por variable `ENVIRONMENT`)
 
-Se o push para o ECR falhar, confira: OIDC configurado no repositório do serviço, role com permissão de `ecr:PutImage` (e demais permissões ECR), e variable `ECR_REPOSITORY_NAME` igual ao nome do repositório no ECR.
+Se o push para o ECR falhar, confira: OIDC configurado no repositório do serviço, role com permissão de `ecr:PutImage` (e demais permissões ECR), e, se não usar o padrão, variable `ECR_REPOSITORY_NAME` igual ao nome do repositório no ECR.
 
 ---
 
