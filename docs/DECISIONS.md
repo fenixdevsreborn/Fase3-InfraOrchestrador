@@ -34,6 +34,7 @@ Este documento registra as decisões explícitas tomadas para a infraestrutura A
 - **JWT:** Se `jwt_issuer_uri` for preenchido (ex.: Cognito User Pool URL ou endpoint JWKS da Users API), o API Gateway valida o token e repassa o contexto para a integração. Rotas protegidas usam `authorizer_id` no recurso de rota.
 - **Nesta fase:** O módulo cria o authorizer quando há issuer; a rota `$default` está sem authorizer (placeholder). Ao adicionar rotas (ex.: `POST /games/{id}/purchase`), associar o `jwt_authorizer_id` às rotas que exigem autenticação.
 - **Alternativa:** Lambda authorizer (request) para lógica customizada (claims, múltiplos issuers); deixar para fase futura se necessário.
+- **Configuração detalhada:** ver [API-GATEWAY-JWT-AUTHORIZER.md](API-GATEWAY-JWT-AUTHORIZER.md) (issuer, audience, identity source, rotas públicas/protegidas, scopes, rollout, rotação de chaves).
 
 ---
 

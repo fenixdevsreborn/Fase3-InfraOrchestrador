@@ -27,7 +27,7 @@ Lá você encontra:
 
 ### Setup inicial (antes do primeiro deploy)
 
-- [ ] **Bootstrap:** Rodar o Terraform em `bootstrap/` para criar bucket S3 e tabela DynamoDB; preencher `environments/<env>/backend.hcl` (ver [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md))
+- [ ] **Backend do Terraform:** Criar bucket S3 e tabela DynamoDB (por [bootstrap](docs/BOOTSTRAP.md) ou [manual no console AWS](docs/SETUP-MANUAL-AWS-CONSOLE.md)); preencher `environments/<env>/backend.hcl`
 - [ ] OIDC: Identity provider e IAM Role para o repo do orquestrador; secret `AWS_ROLE_ARN_TERRAFORM` no GitHub (ver [docs/OIDC.md](docs/OIDC.md))
 - [ ] Orquestrador: secrets `AWS_ROLE_ARN_TERRAFORM`, `TF_VAR_POSTGRES_MASTER_PASSWORD` (se RDS); variable `AWS_REGION` (opcional)
 - [ ] Cada serviço: `AWS_ROLE_ARN_ECR`, `ORCHESTRATOR_REPO_TOKEN`; variables `ECR_REPOSITORY_NAME`, `ORCHESTRATOR_REPO`
@@ -63,6 +63,8 @@ Detalhes e rollback: [docs/WORKFLOWS-OPERATION.md](docs/WORKFLOWS-OPERATION.md) 
 
 - **Objetivos:** provisionar infra na AWS (API Gateway, SQS, Lambda, ECR, S3, RDS, etc.) sem criar tudo no console; baixo acoplamento; destruição limpa.
 - **Arquitetura e fluxo:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Setup manual no console AWS (sem Terraform/GitHub trigger):** [docs/SETUP-MANUAL-AWS-CONSOLE.md](docs/SETUP-MANUAL-AWS-CONSOLE.md)
+- **Próximos passos sem Terraform (roles prontas):** [docs/PROXIMOS-PASSOS-SEM-TERRAFORM.md](docs/PROXIMOS-PASSOS-SEM-TERRAFORM.md)
 - **Bootstrap (backend S3 + DynamoDB):** [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md)
 - **OIDC (GitHub ↔ AWS):** [docs/OIDC.md](docs/OIDC.md)
 - **Decisões de arquitetura:** [docs/DECISIONS.md](docs/DECISIONS.md)
