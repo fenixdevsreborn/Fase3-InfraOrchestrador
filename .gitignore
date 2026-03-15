@@ -384,3 +384,11 @@ plan.log
 apply.log
 destroy.log
 plan.txt
+
+# ------------------------------------------------------------------------------
+# AWS CDK
+# ------------------------------------------------------------------------------
+cdk/cdk.out/
+cdk/dist/
+cdk/node_modules/
+cdk/package-lock.json

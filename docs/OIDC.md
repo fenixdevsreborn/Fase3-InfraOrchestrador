@@ -73,7 +73,8 @@ Para cada repositório de aplicação (Users API, Games API, etc.) que faz push 
 
 | Nome | Tipo | Obrigatório | Uso |
 |------|------|-------------|-----|
-| `AWS_ROLE_ARN_TERRAFORM` | Secret | Sim | ARN da IAM Role que o GitHub assume para rodar Terraform. |
+| `AWS_ROLE_ARN_TERRAFORM` | Secret | Para Terraform | ARN da IAM Role que o GitHub assume para rodar Terraform. |
+| `AWS_ROLE_ARN_CDK` | Secret | Para CDK | ARN da IAM Role para deploy via CDK (workflow **CDK Deploy**). Pode ser a mesma role do Terraform se tiver permissões de CloudFormation e dos recursos (VPC, ECR, SQS, Lambda, ECS, API Gateway, etc.). |
 | `TF_VAR_POSTGRES_MASTER_PASSWORD` | Secret | Se usar RDS | Senha do PostgreSQL; passada como `TF_VAR_postgres_master_password`. |
 | `AWS_REGION` | Variable | Não (default us-east-1) | Região AWS. |
 

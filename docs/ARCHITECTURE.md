@@ -63,8 +63,23 @@ Visão do fluxo de deploy e da relação entre repositórios, ECR, orquestrador 
 
 ---
 
+## AWS CDK (alternativa ao Terraform)
+
+O repositório inclui um app **AWS CDK** em TypeScript em [`cdk/`](../cdk/), com **um único ambiente (produção)**. Stacks:
+
+- **SharedInfra:** VPC, ECR, SQS, CloudWatch Logs
+- **NotificationLambda:** Lambda container + trigger SQS
+- **EcsApis:** ECS Fargate (Users API, Games API, Payments API) com ALB
+- **ApiGateway:** HTTP API (v2), CORS, JWT Authorizer, rotas para os ALBs
+- **Optional:** RDS PostgreSQL e/ou S3 frontend (opcional)
+
+Deploy incremental. Ver [cdk/README.md](../cdk/README.md) para uso e ordem de deploy.
+
+---
+
 ## Referências
 
 - [DECISIONS.md](DECISIONS.md) — Decisões de arquitetura e custo.
 - [README-OPERATIONAL.md](README-OPERATIONAL.md) — Guia operacional e checklists.
 - [BOOTSTRAP.md](BOOTSTRAP.md) — Criação do backend do Terraform.
+- [cdk/README.md](../cdk/README.md) — Deploy com AWS CDK.
