@@ -1,0 +1,22 @@
+# /opt/fcg-fenix/usersapi/docker-compose.yml
+# Imagem ECR = build Dockerfile.postgres (Postgres + API no mesmo container).
+# ECR_REGISTRY e IMAGE_TAG vêm do .env (atualizadas pelo SSM no deploy).
+
+services:
+  app:
+    image: ${ECR_REGISTRY}:${IMAGE_TAG}
+    container_name: fcg-fenix-usersapi
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-fcg_users}
+    volumes:
+      - users_pgdata:/var/lib/postgresql/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  users_pgdata:

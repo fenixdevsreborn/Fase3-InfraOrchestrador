@@ -1,8 +1,0 @@
-# Backend S3 é configurado por ambiente via -backend-config.
-# NÃO crie backend.tf; use os arquivos em environments/<env>/backend.hcl.
-#
-# 1. Rode o bootstrap: cd bootstrap && terraform apply
-# 2. Preencha environments/prod/backend.hcl (e staging/demo) com bucket e dynamodb_table
-# 3. Init: terraform init -backend-config=environments/prod/backend.hcl
-#
-# Ver: docs/BOOTSTRAP.md

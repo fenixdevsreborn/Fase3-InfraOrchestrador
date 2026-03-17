@@ -1,0 +1,110 @@
+# deploy-ec2.yml (reusable)
+# Workflow reutilizável para deploy remoto em EC2 via SSM Run Command.
+# Chamado pelos repositórios das APIs (usersapi, gamesapi, paymentsapi) após push da imagem para o ECR.
+# Requer: OIDC configurado (AWS_ROLE_ARN) com permissões ssm:SendCommand, ec2:DescribeInstances (ou instance ID em SSM).
+
+name: Deploy EC2 (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        type: string
+        required: true
+        description: "Região AWS (ex.: us-east-1)"
+      environment:
+        type: string
+        required: true
+        description: "Ambiente (ex.: production)"
+      service:
+        type: string
+        required: true
+        description: "Serviço (usersapi, gamesapi, paymentsapi)"
+      repository:
+        type: string
+        required: true
+        description: "URI do repositório ECR (ex.: 123456789.dkr.ecr.us-east-1.amazonaws.com/fcg-fenix-usersapi-ecr)"
+      image_tag:
+        type: string
+        required: true
+        description: "Tag da imagem Docker a implantar"
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+        description: "ARN da role OIDC para assumir na AWS"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Get EC2 instance ID
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=fcg-fenix-${{ inputs.service }}-ec2" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[*].Instances[*].InstanceId' --output text)
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Instance not found for service ${{ inputs.service }}"
+            exit 1
+          fi
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Found instance: $INSTANCE_ID"
+
+      - name: Deploy via SSM Run Command
+        id: ssm
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          SERVICE: ${{ inputs.service }}
+          REPO: ${{ inputs.repository }}
+          TAG: ${{ inputs.image_tag }}
+          REGION: ${{ inputs.aws_region }}
+        run: |
+          APP_DIR="/opt/fcg-fenix/${SERVICE}"
+          # Script na EC2: login ECR, pull, restart. Passado em base64 para evitar escape em JSON.
+          SCRIPT="set -e
+          export AWS_DEFAULT_REGION=${REGION}
+          export ECR_REGISTRY=${REPO}
+          export IMAGE_TAG=${TAG}
+          export SERVICE=${SERVICE}
+          export APP_DIR=${APP_DIR}
+          aws ecr get-login-password --region \$AWS_DEFAULT_REGION | sudo docker login --username AWS --password-stdin \${ECR_REGISTRY%%/*}
+          if [ -f \"\${APP_DIR}/docker-compose.yml\" ]; then
+            touch \"\${APP_DIR}/.env\"
+            (grep -q '^ECR_REGISTRY=' \"\${APP_DIR}/.env\" && sed -i \"s|^ECR_REGISTRY=.*|ECR_REGISTRY=\$ECR_REGISTRY|\" \"\${APP_DIR}/.env\") || echo \"ECR_REGISTRY=\$ECR_REGISTRY\" >> \"\${APP_DIR}/.env\"
+            (grep -q '^IMAGE_TAG=' \"\${APP_DIR}/.env\" && sed -i \"s|^IMAGE_TAG=.*|IMAGE_TAG=\$IMAGE_TAG|\" \"\${APP_DIR}/.env\") || echo \"IMAGE_TAG=\$IMAGE_TAG\" >> \"\${APP_DIR}/.env\"
+            (cd \${APP_DIR} && sudo -E docker compose pull && sudo -E docker compose up -d)
+          else
+            sudo docker pull \${ECR_REGISTRY}:\${IMAGE_TAG}
+            sudo docker stop \${SERVICE}-app 2>/dev/null || true
+            sudo docker rm \${SERVICE}-app 2>/dev/null || true
+            sudo docker run -d --name \${SERVICE}-app -p 80:80 --restart unless-stopped \${ECR_REGISTRY}:\${IMAGE_TAG}
+          fi"
+          B64=$(echo "$SCRIPT" | base64 -w0)
+          PARAMS=$(jq -n --arg b64 "$B64" '{commands: ["echo \($b64) | base64 -d | sudo bash"]}')
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "$PARAMS" \
+            --comment "Deploy $SERVICE from GitHub Actions" \
+            --output text --query 'Command.CommandId')
+          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+          echo "Waiting for SSM command to complete..."
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query 'Status' --output text)
+          if [ "$STATUS" != "Success" ]; then
+            echo "SSM command failed with status: $STATUS"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+            exit 1
+          fi
+          echo "Deploy completed successfully."

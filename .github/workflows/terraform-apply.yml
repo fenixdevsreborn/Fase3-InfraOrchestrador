@@ -1,114 +1,53 @@
-# ------------------------------------------------------------------------------
-# Terraform Apply — execução manual
-# Aplica a infra completa ou atualiza apenas as imagens quando informadas.
-# ------------------------------------------------------------------------------
+# terraform-apply.yml
+# Executa terraform apply na branch main (ou em ambiente protegido).
+# Usa OIDC para autenticação na AWS. Pode ser acionado por push em main ou manualmente (workflow_dispatch).
 
 name: Terraform Apply
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-apply.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Ambiente (prod, staging, demo)'
-        required: true
-        type: choice
-        options:
-          - prod
-          - staging
-          - demo
-        default: prod
-      users_api_image:
-        description: 'Tag da imagem Users API (ex.: latest ou SHA). Vazio = não altera.'
-        required: false
-        type: string
-      games_api_image:
-        description: 'Tag da imagem Games API. Vazio = não altera.'
-        required: false
-        type: string
-      payments_api_image:
-        description: 'Tag da imagem Payments API. Vazio = não altera.'
-        required: false
-        type: string
-      notification_lambda_image:
-        description: 'Tag da imagem Notification Lambda. Vazio = não altera.'
-        required: false
-        type: string
 
 env:
-  TF_INPUT: false
-  TF_IN_AUTOMATION: true
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TF_WORKING_DIR: terraform/environments/production
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   apply:
-    name: Terraform Apply
+    name: Apply
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+    environment: production
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS (OIDC)
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_TERRAFORM }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-
-      - name: Prepare image_tags.auto.tfvars (optional overrides)
-        id: tfvars
-        run: |
-          if [ ! -f image_tags.auto.tfvars ]; then
-            if [ -f image_tags.auto.tfvars.example ]; then
-              cp image_tags.auto.tfvars.example image_tags.auto.tfvars
-            else
-              echo 'ecr_image_tag_users_api = "latest"' > image_tags.auto.tfvars
-              echo 'ecr_image_tag_games_api = "latest"' >> image_tags.auto.tfvars
-              echo 'ecr_image_tag_payments_api = "latest"' >> image_tags.auto.tfvars
-              echo 'ecr_image_tag_notification_lambda = "latest"' >> image_tags.auto.tfvars
-            fi
-          fi
-          TFVAR="image_tags.auto.tfvars"
-          [ -n "${{ inputs.users_api_image }}" ] && sed -i 's/^[[:space:]]*ecr_image_tag_users_api[[:space:]]*=[[:space:]]*.*/  ecr_image_tag_users_api = "'"${{ inputs.users_api_image }}"'"/' "$TFVAR" || true
-          [ -n "${{ inputs.games_api_image }}" ] && sed -i 's/^[[:space:]]*ecr_image_tag_games_api[[:space:]]*=[[:space:]]*.*/  ecr_image_tag_games_api = "'"${{ inputs.games_api_image }}"'"/' "$TFVAR" || true
-          [ -n "${{ inputs.payments_api_image }}" ] && sed -i 's/^[[:space:]]*ecr_image_tag_payments_api[[:space:]]*=[[:space:]]*.*/  ecr_image_tag_payments_api = "'"${{ inputs.payments_api_image }}"'"/' "$TFVAR" || true
-          [ -n "${{ inputs.notification_lambda_image }}" ] && sed -i 's/^[[:space:]]*ecr_image_tag_notification_lambda[[:space:]]*=[[:space:]]*.*/  ecr_image_tag_notification_lambda = "'"${{ inputs.notification_lambda_image }}"'"/' "$TFVAR" || true
-          echo "--- image_tags.auto.tfvars ---"
-          cat image_tags.auto.tfvars || true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.0"
+          terraform_version: "1.5.0"
           terraform_wrapper: false
 
       - name: Terraform Init
-        run: terraform init -no-color -backend-config=environments/${{ inputs.environment }}/backend.hcl
-        env:
-          TF_VAR_environment: ${{ inputs.environment }}
-
-      - name: Terraform Validate
-        run: terraform validate -no-color
+        run: terraform init
 
       - name: Terraform Apply
-        id: apply
         run: |
-          if [ -f image_tags.auto.tfvars ]; then
-            terraform apply -no-color -auto-approve -var-file=image_tags.auto.tfvars 2>&1 | tee apply.log
-          else
-            terraform apply -no-color -auto-approve 2>&1 | tee apply.log
-          fi
-          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_postgres_master_password: ${{ secrets.TF_VAR_POSTGRES_MASTER_PASSWORD }}
-
-      - name: Summary
-        if: always()
-        run: |
-          echo "## Terraform Apply — ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Ambiente:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Imagens (override):** users=${{ inputs.users_api_image || '—' }}, games=${{ inputs.games_api_image || '—' }}, payments=${{ inputs.payments_api_image || '—' }}, lambda=${{ inputs.notification_lambda_image || '—' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Apply exit code:** ${{ steps.apply.outputs.exitcode }}" >> $GITHUB_STEP_SUMMARY
+          terraform apply -auto-approve -input=false \
+            -var-file=terraform.tfvars
