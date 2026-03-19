@@ -44,15 +44,21 @@ jobs:
           terraform_version: "1.5.0"
           terraform_wrapper: false
 
-      - name: Create terraform.tfvars from secret (CI)
+      - name: Create terraform.tfvars (CI)
         env:
+          TFVARS: ${{ secrets.TFVARS }}
           TFVARS_B64: ${{ secrets.TFVARS_B64 }}
         run: |
-          if [ -n "$TFVARS_B64" ]; then
+          if [ -f terraform.tfvars ]; then
+            echo "Using existing terraform.tfvars from repo."
+          elif [ -n "$TFVARS" ]; then
+            echo "$TFVARS" > terraform.tfvars
+            echo "terraform.tfvars created from secret TFVARS (raw content)."
+          elif [ -n "$TFVARS_B64" ]; then
             echo "$TFVARS_B64" | base64 -d > terraform.tfvars
             echo "terraform.tfvars created from secret TFVARS_B64."
-          elif [ ! -f terraform.tfvars ]; then
-            echo "::error::No terraform.tfvars and no secret TFVARS_B64. Add repo secret TFVARS_B64 (base64 of terraform.tfvars) or commit terraform.tfvars."
+          else
+            echo "::error::No terraform.tfvars found. Use one of: (1) Commit terraform.tfvars in repo (easiest), (2) Secret TFVARS (raw content), or (3) Secret TFVARS_B64 (base64). See README section 2.3 and 13.5."
             exit 1
           fi
 
