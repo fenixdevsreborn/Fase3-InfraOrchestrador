@@ -43,6 +43,18 @@ jobs:
           terraform_version: "1.5.0"
           terraform_wrapper: false
 
+      - name: Create terraform.tfvars from secret (CI)
+        env:
+          TFVARS_B64: ${{ secrets.TFVARS_B64 }}
+        run: |
+          if [ -n "$TFVARS_B64" ]; then
+            echo "$TFVARS_B64" | base64 -d > terraform.tfvars
+            echo "terraform.tfvars created from secret TFVARS_B64."
+          elif [ ! -f terraform.tfvars ]; then
+            echo "::error::No terraform.tfvars and no secret TFVARS_B64. Add repo secret TFVARS_B64 (base64 of terraform.tfvars) or commit terraform.tfvars."
+            exit 1
+          fi
+
       - name: Terraform Format
         id: fmt
         run: terraform fmt -check -recursive ../..

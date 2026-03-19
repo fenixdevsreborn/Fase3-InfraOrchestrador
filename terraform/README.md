@@ -21,11 +21,13 @@ terraform -chdir=terraform/environments/production plan -var-file=terraform.tfva
 terraform -chdir=terraform/environments/production apply -var-file=terraform.tfvars
 ```
 
-## Antes do primeiro apply
+## Antes do primeiro apply (backend remoto + CI)
 
-1. Criar bucket S3 `fcg-fenix-tfstate` e tabela DynamoDB para lock (ex.: `fcg-fenix-tfstate-lock`).
-2. Descomentar e ajustar o bloco `backend "s3"` em `environments/production/backend.tf`.
-3. Copiar `terraform.tfvars.example` para `terraform.tfvars` e preencher (sem versionar secrets).
+1. **Bootstrap do backend (uma vez):** No GitHub → Actions → **Terraform Bootstrap (Backend S3 + DynamoDB)** → Run workflow. Isso cria o bucket `fcg-fenix-tfstate` e a tabela `fcg-fenix-tfstate-lock` na AWS. O backend já está habilitado em `environments/production/backend.tf`.
+2. **Variáveis em CI:** Para Plan/Apply no GitHub Actions, use uma das opções:
+   - **Secret `TFVARS_B64`:** conteúdo do `terraform.tfvars` em base64 (Settings → Secrets → TFVARS_B64). Ex.: `base64 -w0 terraform.tfvars` (Linux) e colar o resultado no secret.
+   - **Ou** commitar `terraform.tfvars` no repositório (apenas se não tiver segredos).
+3. **Local:** Copiar `terraform.tfvars.example` para `terraform.tfvars` e preencher (não versionar se tiver segredos).
 
 ## Módulos
 

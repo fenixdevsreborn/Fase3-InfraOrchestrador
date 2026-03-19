@@ -4,6 +4,8 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 **Variáveis e configuração:** seção **13** (variáveis do GitHub por repositório) e **14** (variáveis nas EC2 e no Terraform), com passo a passo detalhado.
 
+**Ordem de provisionamento:** seção **2.2** (ordem completa, do zero até o deploy das APIs). **Bootstrap (backend remoto):** seção **2.1**.
+
 ---
 
 ## 1. Visão geral da arquitetura
@@ -24,22 +26,74 @@ Fluxo resumido: **código (API) → build → push ECR → SSM na EC2 → docker
 
 A infraestrutura é provisionada com **Terraform** no ambiente `production`. O root do Terraform é `terraform/environments/production`.
 
-### Pré-requisitos
+---
 
-1. **Backend remoto (primeira vez)**  
-   - Criar bucket S3: `fcg-fenix-tfstate`.  
-   - Criar tabela DynamoDB para lock: `fcg-fenix-tfstate-lock` (partition key: `LockID`, tipo String).  
-   - Em `terraform/environments/production/backend.tf`, descomentar o bloco `backend "s3"` e ajustar `bucket`, `region` e `dynamodb_table`.
+### 2.1 Ordem completa de provisionamento (do zero ao deploy das APIs)
 
-2. **Variáveis**  
-   - Copiar `terraform/environments/production/terraform.tfvars.example` para `terraform.tfvars` no mesmo diretório.  
-   - Preencher `terraform.tfvars` (região, VPC, subnets, `tags_base`, `github_oidc_org`, `github_oidc_repos`, `instance_type`, `alb_target_port`). Não versionar `terraform.tfvars` se contiver segredos.
+Siga esta ordem para ter a infra e o pipeline funcionando de ponta a ponta:
 
-3. **Credenciais AWS**  
-   - Para execução local: AWS CLI configurado (perfil ou variáveis de ambiente) com permissões para criar os recursos.  
-   - Para GitHub Actions: configurar variáveis do repositório (`AWS_REGION`) e o secret ou variável `AWS_ROLE_ARN` da role OIDC com permissões de Terraform e acesso ao backend S3.
+| # | Etapa | Onde / Como | Seção |
+|---|--------|-------------|--------|
+| 1 | **IdP OIDC do GitHub na AWS** | IAM → Identity providers → Add provider (URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`). | 13.4 |
+| 2 | **Role IAM (trust + permission policy)** | Criar role; Trust policy com `SUA_ORG` (ex.: `fenixdevsreborn`); Permission policy (Terraform + ECR + SSM + EC2 + IAM restrita). Copiar ARN. | 13.4 |
+| 3 | **Bootstrap do backend remoto** | GitHub Actions → **Terraform Bootstrap (Backend S3 + DynamoDB)** → Run workflow (uma vez). | 2.2 |
+| 4 | **Variables e Secrets no repo de infra** | No **Fase3-InfraOrchestrador**: Variables `AWS_ROLE_ARN`, `AWS_REGION`; Secret `TFVARS_B64` (base64 do `terraform.tfvars`). | 13.1, 13.5 |
+| 5 | **Terraform Apply** | Push em `master` alterando `terraform/**` ou Actions → **Terraform Apply** → Run workflow. Cria VPC, ECR, EC2, ALB, SSM, API Gateway, etc. | 4 |
+| 6 | **Preparar EC2 (docker-compose, .env)** | Em cada EC2: criar `/opt/fcg-fenix/{service}` se não existir; copiar `docker-compose.yml`, `.env` (ECR_REGISTRY, IMAGE_TAG, Postgres). | 14.1 |
+| 7 | **Variables e Secrets nos repos das APIs** | Em **Fase3-UsersAPI**, **Fase3-GamesAPI**, **Fase3-PaymentsAPI**: Secret `AWS_ROLE_ARN`; Variable `AWS_REGION` (opcional). O `deploy.yml` usa repositório de infra em literal (`fenixdevsreborn/Fase3-InfraOrchestrador`). | 13.2, 13.5 |
+| 8 | **Deploy das APIs** | Push na branch de deploy (ex.: `junonn/mvp-aws`) em cada repo de API: testes → build Docker → push ECR → chamada ao reusable deploy-ec2. | 5 |
 
-### Ordem de provisionamento
+Resumo rápido: **IdP OIDC → Role IAM → Bootstrap → Vars/Secrets Infra → Terraform Apply → EC2 (.env/compose) → Vars/Secrets APIs → Deploy**.
+
+---
+
+### 2.2 Bootstrap do backend remoto (passo a passo)
+
+O **Bootstrap** cria na AWS o bucket S3 e a tabela DynamoDB usados pelo Terraform para armazenar o state e o lock. É executado **uma única vez** antes do primeiro Terraform Plan/Apply no GitHub.
+
+#### O que o Bootstrap cria
+
+| Recurso | Nome | Uso |
+|---------|------|-----|
+| Bucket S3 | `fcg-fenix-tfstate` | Armazena o arquivo `production/terraform.tfstate`. Versionamento e criptografia habilitados. |
+| Tabela DynamoDB | `fcg-fenix-tfstate-lock` | Lock para evitar apply simultâneo. Chave primária: `LockID` (String). |
+
+O arquivo `terraform/environments/production/backend.tf` já está configurado para usar esses nomes e a região `us-east-1`. Não é necessário editar nada após o Bootstrap.
+
+#### Pré-requisitos para rodar o Bootstrap
+
+1. **IdP OIDC do GitHub** configurado na conta AWS (seção 13.4).
+2. **Role IAM** criada com a Trust policy que permite o repositório **Fase3-InfraOrchestrador** (e, se quiser usar a mesma role para as APIs, os três repos de API). Permission policy deve incluir pelo menos:
+   - `s3:CreateBucket`, `s3:PutBucketVersioning`, `s3:PutBucketEncryption`, `s3:HeadBucket`
+   - `dynamodb:CreateTable`, `dynamodb:DescribeTable`, `dynamodb:Wait`
+3. **No repositório Fase3-InfraOrchestrador**, em **Settings → Secrets and variables → Actions**:
+   - **Variable** `AWS_ROLE_ARN`: ARN da role (ex.: `arn:aws:iam::682839842435:role/fcg-fenix-githubactions-role`).
+   - **Variable** `AWS_REGION` (opcional): ex.: `us-east-1`. Se não definir, o workflow usa `us-east-1`.
+
+#### Passos para executar o Bootstrap
+
+1. Abra o repositório **Fase3-InfraOrchestrador** no GitHub.
+2. Vá em **Actions**.
+3. No menu lateral, selecione o workflow **"Terraform Bootstrap (Backend S3 + DynamoDB)"**.
+4. Clique em **Run workflow** (branch: `master`) e em **Run workflow** no modal.
+5. Aguarde o fim do job **"Create S3 bucket and DynamoDB lock table"**. Deve terminar em verde.
+6. (Opcional) Verifique na AWS:
+   - **S3:** existe o bucket `fcg-fenix-tfstate` com versionamento e criptografia.
+   - **DynamoDB:** existe a tabela `fcg-fenix-tfstate-lock` com atributo `LockID` (String) como chave de partição.
+
+Se o bucket ou a tabela já existirem, o workflow não falha: ele detecta e apenas informa que já existem.
+
+Após o Bootstrap, você pode rodar **Terraform Plan** (em PR) e **Terraform Apply** (push em `master` ou manual); o `terraform init` nos workflows usará automaticamente o backend S3 configurado em `backend.tf`.
+
+---
+
+### 2.3 Pré-requisitos (resumo para Plan/Apply)
+
+1. **Backend remoto:** já criado pelo Bootstrap (seção 2.2).
+2. **Variáveis Terraform em CI:** secret **`TFVARS_B64`** (conteúdo do `terraform.tfvars` em base64) no repositório de infra, **ou** arquivo `terraform.tfvars` versionado (apenas se não tiver segredos). Ver seção 13.5 e 14.2.
+3. **Credenciais AWS em CI:** variável **`AWS_ROLE_ARN`** (e opcionalmente **`AWS_REGION`**) no repositório de infra.
+
+### 2.4 Ordem de provisionamento (Terraform)
 
 1. `terraform init` (no diretório `terraform/environments/production`).  
 2. `terraform plan -var-file=terraform.tfvars` para revisar mudanças.  
@@ -56,7 +110,7 @@ Após o apply, cada EC2 terá user data que instala Docker e cria o diretório `
 - **Workflow:** `Terraform Plan` (`.github/workflows/terraform-plan.yml`).  
 - **Gatilho:** pull request para a branch `master` que altera arquivos em `terraform/**` ou o próprio workflow.  
 - **Passos:** checkout → Configure AWS (OIDC) → Setup Terraform → `terraform fmt -check` → `terraform init` → `terraform validate` → `terraform plan -no-color -input=false -out=tfplan -var-file=terraform.tfvars`. O log do plan é postado como comentário no PR.  
-- **Requisitos:** no repositório de infraestrutura, configurar `vars.AWS_ROLE_ARN` (ou secret) e `vars.AWS_REGION` (opcional, default `us-east-1`). O arquivo `terraform.tfvars` deve existir no ambiente do workflow (por exemplo versionado sem segredos ou injetado por outro meio).
+- **Requisitos:** no repositório, configurar `vars.AWS_ROLE_ARN`, `vars.AWS_REGION` (opcional). Para variáveis Terraform em CI: secret `TFVARS_B64` (conteúdo de `terraform.tfvars` em base64) ou arquivo `terraform.tfvars` versionado (sem segredos).
 
 ### Local
 
@@ -85,7 +139,7 @@ terraform -chdir=terraform/environments/production plan -var-file=terraform.tfva
 - **Gatilho:** push na branch `master` que altera `terraform/**` ou o próprio workflow, ou execução manual (`workflow_dispatch`).  
 - **Ambiente:** usa o environment `production` (pode ser protegido com aprovação).  
 - **Passos:** checkout → Configure AWS (OIDC) → Setup Terraform → `terraform init` → `terraform apply -auto-approve -input=false -var-file=terraform.tfvars`.  
-- **Requisitos:** mesmo que o plan (`vars.AWS_ROLE_ARN`, `vars.AWS_REGION`, `terraform.tfvars` disponível).
+- **Requisitos:** mesmo que o plan (`vars.AWS_ROLE_ARN`, `vars.AWS_REGION`, secret `TFVARS_B64` ou `terraform.tfvars` no repo).
 
 ### Local
 
@@ -344,21 +398,23 @@ Cada repositório precisa de **Variables** e **Secrets** configurados em **Setti
 
 ### 13.1 Repositório de infraestrutura (Fase3-InfraOrchestrador)
 
-Usado pelos workflows **Terraform Plan**, **Terraform Apply** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
+Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
 
 | Tipo    | Nome            | Obrigatório | Descrição |
 |---------|-----------------|-------------|-----------|
 | Variable | `AWS_REGION`   | Não         | Região AWS (ex.: `us-east-1`). Default nos workflows: `us-east-1` se não definido. |
-| Variable | `AWS_ROLE_ARN` | Sim         | ARN da role IAM que o GitHub Actions assume via OIDC (Terraform plan/apply: acesso a S3/DynamoDB, AWS APIs; deploy-ec2: recebido como secret do repo que chama). |
+| Variable | `AWS_ROLE_ARN` | Sim         | ARN da role IAM que o GitHub Actions assume via OIDC (Bootstrap, Terraform plan/apply, deploy-ec2 quando chamado). |
+| Secret   | `TFVARS_B64`   | Sim (para Plan/Apply em CI) | Conteúdo do arquivo `terraform.tfvars` em **base64**. Os workflows Plan e Apply decodificam e geram `terraform.tfvars` no runner. Ver seção 13.5. |
 
 **Passo a passo — Repositório de infraestrutura:**
 
-1. Abra o repositório no GitHub → **Settings** → **Secrets and variables** → **Actions**.
+1. Abra o repositório **Fase3-InfraOrchestrador** no GitHub → **Settings** → **Secrets and variables** → **Actions**.
 2. Aba **Variables**:
    - **New repository variable**: nome `AWS_REGION`, valor `us-east-1` (ou a região do ambiente).
-   - **New repository variable**: nome `AWS_ROLE_ARN`, valor o ARN da role OIDC (ex.: `arn:aws:iam::123456789012:role/fcg-fenix-githubactions-role`).
-3. Não é necessário criar **Secrets** no repo de infra para Terraform (os workflows usam `vars.AWS_ROLE_ARN`). O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
-4. Salve. Os workflows **Terraform Plan** (em PR) e **Terraform Apply** (push em `master` ou manual) passarão a usar essas variáveis.
+   - **New repository variable**: nome `AWS_ROLE_ARN`, valor o ARN da role OIDC (ex.: `arn:aws:iam::682839842435:role/fcg-fenix-githubactions-role`).
+3. Aba **Secrets**:
+   - **New repository secret**: nome `TFVARS_B64`. Valor = conteúdo do `terraform.tfvars` em base64. Para gerar: no diretório `terraform/environments/production`, copie `terraform.tfvars.example` para `terraform.tfvars`, edite (região, VPC, `github_oidc_org`, `github_oidc_repos`, etc.), depois execute `base64 -w0 terraform.tfvars` (Linux/WSL) e cole o resultado no secret. Sem esse secret (e sem `terraform.tfvars` versionado no repo), os workflows Terraform Plan e Apply falham com mensagem orientando a configurá-lo.
+4. Salve. Os workflows **Terraform Bootstrap**, **Terraform Plan** e **Terraform Apply** usarão essas configurações. O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
 
 ---
 
@@ -366,9 +422,10 @@ Usado pelos workflows **Terraform Plan**, **Terraform Apply** e pelo **Deploy EC
 
 Cada um dos três repositórios (UsersAPI, GamesAPI, PaymentsAPI) deve ter as mesmas **variáveis e secrets** abaixo para o workflow de **deploy** (`.github/workflows/deploy.yml`) funcionar. O workflow **publish-image** (se usado) pode usar variáveis adicionais.
 
+**Nota:** Os arquivos `deploy.yml` das três APIs estão configurados para chamar o reusable workflow usando o repositório em **literal** `fenixdevsreborn/Fase3-InfraOrchestrador` (não usam a variável `INFRA_REPO`). Se o seu owner for outro, edite o `uses:` no job `deploy` de cada `deploy.yml`.
+
 | Tipo    | Nome               | Obrigatório | Descrição |
 |---------|--------------------|-------------|-----------|
-| Variable | `INFRA_REPO`      | Sim         | Repositório de infra no formato `owner/repo` (ex.: `sua-org/Fase3-InfraOrchestrador`). Usado para chamar o reusable `/.github/workflows/deploy-ec2.yml@master`. |
 | Variable | `AWS_REGION`      | Não         | Região AWS (ex.: `us-east-1`). Default nos workflows: `us-east-1`. |
 | Secret   | `AWS_ROLE_ARN`    | Sim         | ARN da role IAM OIDC com permissão para ECR (push), SSM SendCommand e EC2 DescribeInstances. O mesmo ARN pode ser usado para os três repos se a trust policy permitir. |
 
@@ -376,23 +433,45 @@ Cada um dos três repositórios (UsersAPI, GamesAPI, PaymentsAPI) deve ter as me
 
 1. Abra o repositório no GitHub → **Settings** → **Secrets and variables** → **Actions**.
 2. Aba **Variables**:
-   - **New repository variable**: nome `INFRA_REPO`, valor `SEU_OWNER/Fase3-InfraOrchestrador` (ex.: `minha-org/Fase3-InfraOrchestrador`). Substituir pelo owner real do repositório de infraestrutura.
    - **New repository variable** (opcional): nome `AWS_REGION`, valor `us-east-1`.
 3. Aba **Secrets**:
-   - **New repository secret**: nome `AWS_ROLE_ARN`, valor o ARN da role OIDC que tem permissão para ECR e SSM (ex.: `arn:aws:iam::123456789012:role/fcg-fenix-githubactions-role`). Pode ser a mesma role do repo de infra, desde que a trust policy inclua este repositório e a role tenha as políticas de ECR + SSM + EC2.
-4. Salve. O deploy (push na branch de deploy) passará a conseguir fazer push no ECR e chamar o reusable de deploy na EC2.
+   - **New repository secret**: nome `AWS_ROLE_ARN`, valor o ARN da role OIDC (ex.: `arn:aws:iam::682839842435:role/fcg-fenix-githubactions-role`). A trust policy da role deve incluir este repositório (ex.: `repo:fenixdevsreborn/Fase3-UsersAPI:*`).
+4. Salve. O deploy (push na branch de deploy) fará push no ECR e chamará o reusable `fenixdevsreborn/Fase3-InfraOrchestrador/.github/workflows/deploy-ec2.yml@master`.
 
-**Se usar o workflow publish-image (opcional):** pode ser necessário também `vars.ECR_REPOSITORY_NAME` e `secrets.AWS_ROLE_ARN_ECR` conforme o workflow; para o deploy principal (deploy.yml) basta `INFRA_REPO`, `AWS_REGION` e `AWS_ROLE_ARN`.
+**Se usar o workflow publish-image (opcional):** pode ser necessário também `vars.ECR_REPOSITORY_NAME` e `secrets.AWS_ROLE_ARN_ECR` conforme o workflow; para o deploy principal (deploy.yml) basta `AWS_REGION` e `AWS_ROLE_ARN`.
 
 ---
 
 ### 13.3 Resumo — Onde configurar cada item
 
-| Item            | Infra (Terraform) | Infra (deploy reusable) | UsersAPI / GamesAPI / PaymentsAPI |
-|-----------------|-------------------|--------------------------|-----------------------------------|
-| `AWS_REGION`    | Variable (opcional) | Herda do caller        | Variable (opcional)              |
-| `AWS_ROLE_ARN`  | Variable (obrigatório para plan/apply) | Recebido como secret do caller | Secret (obrigatório) |
-| `INFRA_REPO`    | —                 | —                        | Variable (obrigatório)            |
+| Item            | Infra (Bootstrap, Plan, Apply) | Infra (deploy reusable) | UsersAPI / GamesAPI / PaymentsAPI |
+|-----------------|----------------------------------|--------------------------|-----------------------------------|
+| `AWS_REGION`    | Variable (opcional)              | Herda do caller          | Variable (opcional)                |
+| `AWS_ROLE_ARN`  | Variable (obrigatório)           | Recebido como secret do caller | Secret (obrigatório)        |
+| `TFVARS_B64`    | Secret (obrigatório para Plan/Apply em CI) | —                  | —                                 |
+
+O repositório de infra é referenciado em **literal** nos `deploy.yml` das APIs (`fenixdevsreborn/Fase3-InfraOrchestrador`); não é necessário configurar `INFRA_REPO` nas APIs.
+
+---
+
+### 13.5 Tabela consolidada — Variables e Secrets por repositório
+
+Use esta tabela como checklist ao configurar cada repositório.
+
+#### Fase3-InfraOrchestrador
+
+| Tipo     | Nome           | Obrigatório | Exemplo / Observação |
+|----------|----------------|------------|----------------------|
+| Variable | `AWS_REGION`   | Não        | `us-east-1` |
+| Variable | `AWS_ROLE_ARN` | Sim        | `arn:aws:iam::CONTA:role/fcg-fenix-githubactions-role` |
+| Secret   | `TFVARS_B64`   | Sim (CI)   | Base64 do conteúdo de `terraform.tfvars` (`base64 -w0 terraform.tfvars`) |
+
+#### Fase3-UsersAPI / Fase3-GamesAPI / Fase3-PaymentsAPI (cada um)
+
+| Tipo     | Nome           | Obrigatório | Exemplo / Observação |
+|----------|----------------|------------|----------------------|
+| Variable | `AWS_REGION`   | Não        | `us-east-1` |
+| Secret   | `AWS_ROLE_ARN` | Sim        | Mesmo ARN da role usada no repo de infra (trust policy deve incluir o repo da API). |
 
 ---
 
@@ -702,7 +781,7 @@ O ambiente **production** usa variáveis definidas em `terraform/environments/pr
    - **github_oidc_repos:** lista dos repositórios permitidos na trust policy da role OIDC (ex.: `["minha-org/Fase3-InfraOrchestrador", "minha-org/Fase3-UsersAPI", ...]`).
    - **instance_type** e **alb_target_port:** opcional; usar defaults se não precisar alterar.
 4. Não versionar `terraform.tfvars` se contiver dados sensíveis (adicionar ao `.gitignore` se necessário).
-5. Para rodar no GitHub Actions: o workflow espera que `terraform.tfvars` exista no repositório (sem segredos) ou que os valores sejam injetados por outro meio (ex.: environment secrets). Se usar apenas local, manter `terraform.tfvars` apenas na máquina local.
+5. Para rodar no GitHub Actions: configurar o **secret `TFVARS_B64`** (conteúdo de `terraform.tfvars` em base64) no repositório de infra — os workflows Plan e Apply decodificam e geram o arquivo no runner. Alternativa: versionar `terraform.tfvars` no repo (apenas se não tiver segredos). Ver seções 13.1 e 13.5.
 
 Referência completa: `terraform/environments/production/terraform.tfvars.example` e `terraform/environments/production/variables.tf`.
 
@@ -719,9 +798,68 @@ Referência completa: `terraform/environments/production/terraform.tfvars.exampl
 
 ---
 
+## 15. Alterações e recursos adicionados ao projeto
+
+Esta seção resume o que foi incorporado ao repositório para permitir provisionamento completo via GitHub Actions (backend remoto, Bootstrap, ECR e demais recursos criados pelo Terraform) e deploy das APIs sem configuração manual de repositórios ECR.
+
+### 15.1 Bootstrap do backend remoto
+
+- **Workflow:** `.github/workflows/terraform-bootstrap.yml`  
+  - **Nome no Actions:** Terraform Bootstrap (Backend S3 + DynamoDB).  
+  - **Gatilho:** apenas manual (`workflow_dispatch`).  
+  - **Função:** cria o bucket S3 `fcg-fenix-tfstate` e a tabela DynamoDB `fcg-fenix-tfstate-lock` na AWS (região via `vars.AWS_REGION` ou default `us-east-1`). Idempotente: se já existirem, não falha.  
+  - **Requisitos:** variável `AWS_ROLE_ARN` (e opcionalmente `AWS_REGION`) no repositório de infra.  
+  - **Documentação detalhada:** seção 2.2.
+
+### 15.2 Backend Terraform habilitado
+
+- **Arquivo:** `terraform/environments/production/backend.tf`  
+  - Bloco `backend "s3"` **ativo**, com bucket `fcg-fenix-tfstate`, key `production/terraform.tfstate`, região `us-east-1`, tabela de lock `fcg-fenix-tfstate-lock`, `encrypt = true`.  
+  - Permite que Terraform Plan e Apply no GitHub Actions usem state remoto (sem criar bucket/tabela manualmente antes, desde que o Bootstrap tenha sido executado).
+
+### 15.3 Variáveis Terraform em CI (terraform.tfvars)
+
+- **Workflows afetados:** `terraform-plan.yml`, `terraform-apply.yml`.  
+  - Novo passo **"Create terraform.tfvars from secret (CI)"**: se o secret **`TFVARS_B64`** estiver definido, o conteúdo é decodificado de base64 e escrito em `terraform.tfvars` no diretório de trabalho; se não houver secret nem arquivo versionado, o job falha com mensagem orientando a configurar `TFVARS_B64`.  
+  - Permite rodar Plan e Apply em CI sem versionar `terraform.tfvars` no repositório.  
+  - **Documentação:** seções 13.1, 13.5 e 14.2.
+
+### 15.4 Workflows de deploy das APIs (deploy.yml)
+
+- **Repositórios:** Fase3-UsersAPI, Fase3-GamesAPI, Fase3-PaymentsAPI.  
+  - **Job `deploy`:** passou a chamar o reusable workflow com **`uses:` em valor literal** (ex.: `fenixdevsreborn/Fase3-InfraOrchestrador/.github/workflows/deploy-ec2.yml@master`) em vez de expressão `${{ vars.INFRA_REPO }}/...`, para evitar erro de "workflow not found" no GitHub.  
+  - **`runs-on`** removido do job `deploy` (job que chama reusable não pode ter `runs-on`).  
+  - **`service`** no `with:` passou a valor literal (`usersapi`, `gamesapi`, `paymentsapi`) em vez de `${{ env.SERVICE }}`, pois no contexto do job de reusable o GitHub não reconhece `env` nesse ponto.  
+  - Com isso, o deploy (push na branch configurada) consegue fazer push no ECR e chamar o reusable para deploy na EC2.
+
+### 15.5 Role OIDC (Trust e Permission policy)
+
+- **Trust policy:** documentada na seção 13.4; deve incluir o owner correto (ex.: `fenixdevsreborn`) para os repositórios Fase3-InfraOrchestrador, Fase3-UsersAPI, Fase3-GamesAPI, Fase3-PaymentsAPI.  
+- **Permission policy:**  
+  - Inclui Terraform (state S3, lock DynamoDB, APIs AWS), ECR (auth + push nos três repositórios ECR), SSM (SendCommand, GetCommandInvocation, ListCommands), EC2 (DescribeInstances, DescribeInstanceStatus), e opcionalmente Lambda (UpdateFunctionCode).  
+  - **iam:PassRole** restrito pela condição **`iam:PassedToService`** (lista de serviços: ec2, elasticloadbalancing, lambda, apigateway, ecs, ecs-tasks).  
+  - **iam:CreateServiceLinkedRole** restrito a ARNs e condição **`iam:AWSServiceName`** (ex.: ec2, elasticloadbalancing), conforme recomendações da AWS.  
+  - Escopo documentado na seção 13.4 (quem usa o quê: Infra vs. APIs).
+
+### 15.6 Documentação
+
+- **README.md (este arquivo):**  
+  - Seção **2.1** — Ordem completa de provisionamento (do zero ao deploy).  
+  - Seção **2.2** — Bootstrap do backend remoto (passo a passo, o que cria, pré-requisitos, como executar e verificar).  
+  - Seções **2.3** e **2.4** — Pré-requisitos e ordem de provisionamento Terraform.  
+  - Seção **13.1** — Inclusão do secret `TFVARS_B64` e passo a passo para Infra.  
+  - Seção **13.2** — Ajuste para deploy com repositório em literal; tabela de Variables/Secrets das APIs.  
+  - Seção **13.3** — Resumo atualizado com `TFVARS_B64`.  
+  - Seção **13.5** — Tabela consolidada de Variables e Secrets por repositório.  
+- **terraform/README.md:** Antes do primeiro apply — Bootstrap via Actions, uso de `TFVARS_B64` ou `terraform.tfvars` versionado.
+
+---
+
 ## Referências rápidas
 
-- **Variáveis GitHub e AWS (passo a passo):** seções **13** e **14** deste documento. **Role OIDC (trust policy + permission policy em JSON):** seção **13.4**.  
+- **Ordem de provisionamento e Bootstrap:** seções **2.1** (ordem completa) e **2.2** (Bootstrap passo a passo).  
+- **Variables e Secrets (consolidado):** seção **13.5**; detalhes por repo em **13.1** (Infra) e **13.2** (APIs). **Role OIDC (trust + permission policy):** seção **13.4**.  
+- **O que foi adicionado ao projeto:** seção **15**.  
 - **Estratégia de deploy (EC2, compose, .env, SSM, rollback, Postgres):** `docs/deploy-estrategia-operacional-ec2.md`  
 - **Exemplos de arquivos para EC2:** `docs/ec2-examples/` (README + docker-compose, .env.example, deploy.sh por serviço)  
 - **Arquitetura e convenções:** `docs/01-arquitetura-e-convencoes.md`  
