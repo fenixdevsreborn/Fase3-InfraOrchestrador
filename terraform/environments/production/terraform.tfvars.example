@@ -13,8 +13,13 @@ tags_base = {
   Environment = "production"
 }
 
-github_oidc_org   = "sua-org"
-github_oidc_repos = ["fcg-fenix-infra-repo", "fcg-fenix-usersapi-repo", "fcg-fenix-gamesapi-repo", "fcg-fenix-paymentsapi-repo"]
+github_oidc_org = "fenixdevsreborn"
+github_oidc_repos = [
+  "fenixdevsreborn/Fase3-InfraOrchestrador",
+  "fenixdevsreborn/Fase3-UsersAPI",
+  "fenixdevsreborn/Fase3-GamesAPI",
+  "fenixdevsreborn/Fase3-PaymentsAPI"
+]
 
 instance_type   = "t3.micro"
 alb_target_port = 80

@@ -122,7 +122,7 @@ resource "aws_apigatewayv2_route" "path_exact" {
 
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "ANY ${each.key}"
-  target    = "integrations/${aws_apigatewayv2_integration.alb.id"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
 # Stage $default: auto deploy, sem path prefix (invoke URL = https://api-id.execute-api.region.amazonaws.com/)
