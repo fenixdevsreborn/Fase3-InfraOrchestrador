@@ -460,9 +460,24 @@ Para **uma única role** usada por infra e pelos três repos de API, use os dois
 
 ---
 
+#### Escopo da permission policy — quem usa o quê
+
+A **mesma role** (e a mesma **permission policy** abaixo) atende a **todos** estes repositórios:
+
+| Repositório | Uso da role |
+|-------------|-------------|
+| **Fase3-InfraOrchestrador** | Terraform plan/apply (state S3, lock DynamoDB, APIs AWS, IAM) e execução do workflow reutilizável `deploy-ec2.yml` quando chamado pelas APIs. |
+| **Fase3-UsersAPI** | Deploy: push da imagem no ECR → chamada ao reusable `deploy-ec2.yml` (SSM + EC2). |
+| **Fase3-GamesAPI** | Deploy: push da imagem no ECR → chamada ao reusable `deploy-ec2.yml` (SSM + EC2). |
+| **Fase3-PaymentsAPI** | Deploy: push da imagem no ECR → chamada ao reusable `deploy-ec2.yml` (SSM + EC2). |
+
+Resumo por bloco da policy (Sid): **TerraformState**, **TerraformLock**, **TerraformAWS**, **TerraformIAM** (e PassRole/CreateSLR) → só Infra. **ECRPush** / **ECRPushRepos** e **DeployEC2SSM** / **DeployEC2Describe** → Infra (quando roda o reusable) e os três repos de API (Users, Games, Payments). **Lambda** (se incluir) → opcional, para atualizar função como a notification-lambda.
+
+---
+
 #### Permission policy (política de permissões da role)
 
-Uma única policy que cobre **Terraform** (plan/apply, state S3/DynamoDB) e **deploy** (ECR push, SSM SendCommand, EC2 DescribeInstances). Ajuste os ARNs de recurso (conta, região, nomes) conforme seu ambiente.
+Uma única policy que cobre **Terraform** (plan/apply, state S3/DynamoDB, APIs AWS, IAM com restrições para PassRole e CreateServiceLinkedRole), **deploy** (ECR push, SSM SendCommand, EC2 DescribeInstances) e, opcionalmente, atualização de Lambda. Ajuste os ARNs (CONTA_AWS, REGIAO, nomes de bucket/tabela/ECR) conforme seu ambiente.
 
 ```json
 {
@@ -501,7 +516,6 @@ Uma única policy que cobre **Terraform** (plan/apply, state S3/DynamoDB) e **de
       "Effect": "Allow",
       "Action": [
         "ec2:*",
-        "iam:*",
         "ecr:*",
         "ssm:*",
         "elasticloadbalancing:*",
@@ -513,22 +527,58 @@ Uma única policy que cobre **Terraform** (plan/apply, state S3/DynamoDB) e **de
       "Resource": "*"
     },
     {
+      "Sid": "TerraformIAM",
+      "Effect": "Allow",
+      "NotAction": [
+        "iam:PassRole",
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TerraformIAMPassRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "ec2.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com",
+            "lambda.amazonaws.com",
+            "apigateway.amazonaws.com",
+            "ecs-tasks.amazonaws.com",
+            "ecs.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "TerraformIAMCreateSLR",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": [
+        "arn:aws:iam::CONTA_AWS:role/aws-service-role/ec2.amazonaws.com/*",
+        "arn:aws:iam::CONTA_AWS:role/aws-service-role/elasticloadbalancing.amazonaws.com/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "ec2.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
       "Sid": "DeployEC2SSM",
       "Effect": "Allow",
       "Action": [
         "ssm:SendCommand",
         "ssm:GetCommandInvocation",
-        "ssm:ListCommandInvocations"
+        "ssm:ListCommands"
       ],
-      "Resource": [
-        "arn:aws:ec2:REGIAO:CONTA_AWS:instance/*",
-        "arn:aws:ssm:REGIAO:CONTA_AWS:*"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "ssm:resourceTag/Project": "fcg-fenix"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "DeployEC2Describe",
@@ -571,9 +621,9 @@ Uma única policy que cobre **Terraform** (plan/apply, state S3/DynamoDB) e **de
 ```
 
 - **CONTA_AWS:** ID da conta (ex.: `123456789012`).
-- **REGIAO:** ex.: `us-east-1` (em `dynamodb:Resource` e `ec2:instance`, `ssm`, `ecr`).
+- **REGIAO:** ex.: `us-east-1` (em `dynamodb:Resource` e `ecr:Resource`).
 
-Em produção você pode restringir mais (por exemplo, trocar `ec2:*` e `iam:*` por ações específicas usadas pelo Terraform). O bloco `TerraformAWS` amplo facilita o uso da mesma role para plan/apply; depois dá para refinar.
+**Quem usa o quê (Infra + UsersAPI + GamesAPI + PaymentsAPI):** Terraform (state, lock, APIs, IAM) → só **Fase3-InfraOrchestrador**. ECR (auth + push nos três repositórios) e SSM/EC2 (deploy) → **Infra** (quando executa o reusable) e **Fase3-UsersAPI**, **Fase3-GamesAPI**, **Fase3-PaymentsAPI**. Os blocos **TerraformIAMPassRole** e **TerraformIAMCreateSLR** seguem as recomendações da AWS (evitar `iam:PassRole` e `iam:CreateServiceLinkedRole` com curinga em Action/Resource). Se precisar atualizar uma Lambda (ex.: notification-lambda) pela mesma role, adicione um Statement com `lambda:UpdateFunctionCode` e o ARN da função.
 
 **Nome sugerido da role:** `fcg-fenix-githubactions-role`. Após criar a role, use o ARN (ex.: `arn:aws:iam::123456789012:role/fcg-fenix-githubactions-role`) em **Variables** ou **Secrets** do GitHub conforme a seção 13.1 e 13.2.
 
