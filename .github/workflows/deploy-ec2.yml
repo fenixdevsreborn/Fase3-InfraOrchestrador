@@ -100,11 +100,18 @@ jobs:
             --output text --query 'Command.CommandId')
           echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
           echo "Waiting for SSM command to complete..."
+          set +e
           aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+          WAIT_RC=$?
+          set -e
           STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query 'Status' --output text)
+          echo "SSM Status: $STATUS (wait exit: $WAIT_RC)"
+          echo "--- SSM stdout ---"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text || true
+          echo "--- SSM stderr ---"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text || true
           if [ "$STATUS" != "Success" ]; then
-            echo "SSM command failed with status: $STATUS"
-            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+            echo "::error::SSM deploy failed. Verifique na EC2: aws instalado, Docker rodando, /opt/fcg-fenix/$SERVICE e (se usar compose) docker compose. Session Manager: ver o comando $COMMAND_ID."
             exit 1
           fi
           echo "Deploy completed successfully."

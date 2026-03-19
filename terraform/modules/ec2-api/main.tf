@@ -33,6 +33,8 @@ locals {
 #!/bin/bash
 set -e
 yum update -y
+# AWS CLI: necessário no deploy via SSM (aws ecr get-login-password na instância)
+yum install -y awscli
 yum install -y docker
 systemctl start docker
 systemctl enable docker
