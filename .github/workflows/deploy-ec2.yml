@@ -50,16 +50,47 @@ jobs:
 
       - name: Get EC2 instance ID
         id: instance
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+          SERVICE: ${{ inputs.service }}
         run: |
+          set -e
+          echo "Procurando EC2 na região: $AWS_REGION (conta abaixo)"
+          aws sts get-caller-identity
+
+          NAME_TAG="fcg-fenix-${SERVICE}-ec2"
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=fcg-fenix-${{ inputs.service }}-ec2" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[*].Instances[*].InstanceId' --output text)
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "Instance not found for service ${{ inputs.service }}"
+            --filters "Name=tag:Name,Values=${NAME_TAG}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[*].Instances[*].InstanceId' --output text | tr '\t' '\n' | head -1)
+
+          # Fallback: tags do Terraform (Project + Service), caso a tag Name tenha sido alterada
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            INSTANCE_ID=$(aws ec2 describe-instances \
+              --filters \
+                "Name=tag:Service,Values=${SERVICE}" \
+                "Name=tag:Project,Values=fcg-fenix" \
+                "Name=instance-state-name,Values=running" \
+              --query 'Reservations[*].Instances[*].InstanceId' --output text | tr '\t' '\n' | head -1)
+          fi
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "::error::Nenhuma instância **running** encontrada para o serviço '${SERVICE}'."
+            echo "Esperado: tag Name='${NAME_TAG}' (ou tags Project=fcg-fenix + Service=${SERVICE})."
+            echo ""
+            echo "Instâncias com Project=fcg-fenix (qualquer estado) — confira InstanceId, estado e AZ:"
+            aws ec2 describe-instances \
+              --filters "Name=tag:Project,Values=fcg-fenix" \
+              --query 'Reservations[*].Instances[*].[InstanceId,State.Name,Placement.AvailabilityZone]' \
+              --output table || true
+            echo ""
+            echo "Checklist: (1) Variable AWS_REGION no repo da API = região do Terraform (ex.: us-east-1)."
+            echo "(2) Instância em estado **running** (não stopped)."
+            echo "(3) Secret AWS_ROLE_ARN = role na **mesma conta** onde o Terraform criou a EC2."
             exit 1
           fi
+
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance: $INSTANCE_ID"
+          echo "Found instance: $INSTANCE_ID (Name esperado: ${NAME_TAG})"
 
       - name: Deploy via SSM Run Command
         id: ssm
