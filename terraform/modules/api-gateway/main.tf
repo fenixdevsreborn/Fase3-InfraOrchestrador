@@ -34,9 +34,14 @@ resource "aws_lb_target_group" "alb" {
   vpc_id      = var.vpc_id
   target_type = "alb"
 
+  # Com target_type = alb, a AWS exige health check HTTP ou HTTPS (não TCP).
+  # O ALB interno usa default fixed-response 404 em "/" (sem regra); matcher 404 = ALB respondendo.
   health_check {
     enabled             = true
-    protocol            = "TCP"
+    protocol            = "HTTP"
+    path                = "/"
+    port                = "traffic-port"
+    matcher             = "404"
     interval            = 30
     healthy_threshold   = 2
     unhealthy_threshold = 2
@@ -94,15 +99,15 @@ resource "aws_apigatewayv2_api" "main" {
   })
 }
 
-# Integração privada: VPC Link -> NLB (uri = NLB:80)
+# Integração privada: VPC Link -> listener do NLB (AWS exige ARN do listener ELB, não URL http://)
 resource "aws_apigatewayv2_integration" "alb" {
-  api_id           = aws_apigatewayv2_api.main.id
-  integration_type = "HTTP_PROXY"
-  integration_uri  = "http://${aws_lb.nlb.dns_name}:${var.alb_listener_port}"
+  api_id             = aws_apigatewayv2_api.main.id
+  integration_type   = "HTTP_PROXY"
+  integration_uri    = aws_lb_listener.nlb.arn
+  integration_method = "ANY"
 
   connection_type        = "VPC_LINK"
   connection_id          = aws_apigatewayv2_vpc_link.main.id
-  integration_method     = "ANY"
   payload_format_version = "1.0"
 }
 
