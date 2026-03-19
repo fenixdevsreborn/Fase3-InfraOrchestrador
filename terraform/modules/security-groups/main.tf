@@ -44,7 +44,7 @@ resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   description       = "Allow port ${each.value.port} from ${each.value.cidr}"
   from_port         = each.value.port
   to_port           = each.value.port
-  protocol          = "tcp"
+  ip_protocol       = "tcp"
   cidr_ipv4         = each.value.cidr
 }
 
@@ -56,7 +56,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_apis" {
   description                  = "Allow ALB to ${each.key}"
   from_port                    = min(var.api_ports...)
   to_port                      = max(var.api_ports...)
-  protocol                     = "tcp"
+  ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.api[each.key].id
 }
 
@@ -80,7 +80,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
   description                  = "Allow from ALB"
   from_port                    = min(var.api_ports...)
   to_port                      = max(var.api_ports...)
-  protocol                     = "tcp"
+  ip_protocol                  = "tcp"
   referenced_security_group_id = aws_security_group.alb.id
 }
 
@@ -92,7 +92,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_ssm" {
   description       = "Allow SSM Agent"
   from_port         = 443
   to_port           = 443
-  protocol          = "tcp"
+  ip_protocol       = "tcp"
   cidr_ipv4         = "0.0.0.0/0"
 }
 
