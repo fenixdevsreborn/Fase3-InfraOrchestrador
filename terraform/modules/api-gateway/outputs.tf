@@ -27,3 +27,23 @@ output "stage_name" {
   value       = aws_apigatewayv2_stage.default.name
   description = "Nome do stage ($default)."
 }
+
+output "access_log_group_name" {
+  value       = aws_cloudwatch_log_group.api_gateway_access.name
+  description = "Nome do log group no CloudWatch para access logs da HTTP API."
+}
+
+output "access_log_group_arn" {
+  value       = aws_cloudwatch_log_group.api_gateway_access.arn
+  description = "ARN do log group de access logs da API Gateway."
+}
+
+output "jwt_authorizer_id" {
+  value       = var.jwt_authorizer_enabled ? aws_apigatewayv2_authorizer.users_jwt[0].id : null
+  description = "ID do authorizer JWT (null se jwt_authorizer_enabled = false)."
+}
+
+output "users_jwt_issuer_effective" {
+  value       = local.users_jwt_issuer_effective
+  description = "Issuer usado no authorizer JWT; deve coincidir com Jwt:Issuer na Users API e nos tokens."
+}

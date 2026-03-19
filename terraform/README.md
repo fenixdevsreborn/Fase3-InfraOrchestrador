@@ -29,6 +29,11 @@ terraform -chdir=terraform/environments/production apply -var-file=terraform.tfv
    - **Ou** commitar `terraform.tfvars` no repositório (apenas se não tiver segredos).
 3. **Local:** Copiar `terraform.tfvars.example` para `terraform.tfvars` e preencher (não versionar se tiver segredos).
 
+## Destruir a infra (parar custos)
+
+- **GitHub Actions:** workflow **Terraform Destroy (manual)** — só `workflow_dispatch`, com confirmação `DESTROY` e opção de plan sem aplicar. Ver README raiz do repositório, seção *Destruir infraestrutura*.
+- **CLI:** `terraform plan -destroy` e `terraform destroy -var-file=terraform.tfvars` em `environments/production`.
+
 ## Módulos
 
 - `vpc` — VPC, subnets, IGW, NAT, route tables

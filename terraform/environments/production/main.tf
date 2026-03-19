@@ -159,4 +159,8 @@ module "api_gateway" {
   alb_listener_port    = var.alb_target_port
   route_paths          = local.alb_path_prefix_to_service
   tags_base            = var.tags_base
+
+  jwt_authorizer_enabled   = var.api_gateway_jwt_authorizer_enabled
+  users_api_jwt_issuer     = var.users_api_jwt_issuer
+  users_api_jwt_audience   = var.users_api_jwt_audience
 }

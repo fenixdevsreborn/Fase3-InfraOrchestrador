@@ -53,3 +53,58 @@ variable "api_description" {
   description = "Descrição da API HTTP."
   default     = "FCG Fenix HTTP API - private integration via VPC Link to ALB"
 }
+
+variable "api_gateway_access_log_retention_days" {
+  type        = number
+  description = "Retenção (dias) do log group de access logs no CloudWatch. Use 0 para nunca expirar (não recomendado em produção)."
+  default     = 30
+}
+
+variable "api_gateway_detailed_metrics_enabled" {
+  type        = bool
+  description = "Habilita métricas de rota detalhadas no CloudWatch para o stage $default (equivalente ao toggle no console)."
+  default     = true
+}
+
+variable "api_gateway_route_logging_level" {
+  type        = string
+  description = "Nível de log de execução na rota padrão: ERROR, INFO ou OFF (HTTP API v2)."
+  default     = "INFO"
+
+  validation {
+    condition     = contains(["ERROR", "INFO", "OFF"], var.api_gateway_route_logging_level)
+    error_message = "api_gateway_route_logging_level deve ser ERROR, INFO ou OFF."
+  }
+}
+
+variable "api_gateway_data_trace_enabled" {
+  type        = bool
+  description = "Inclui corpo de request/response nos logs de execução (pode expor dados sensíveis e aumentar custo). Default false."
+  default     = false
+}
+
+# --- JWT authorizer (Users API / OIDC) ---
+
+variable "jwt_authorizer_enabled" {
+  type        = bool
+  description = "Se true, exige JWT válido (issuer + audience + JWKS) nas rotas listadas em jwt_authorizer_route_prefixes."
+  default     = true
+}
+
+variable "users_api_jwt_issuer" {
+  type        = string
+  description = "Valor do claim iss / Jwt:Issuer na Users API. Se vazio, usa https://{api-id}.execute-api.{região}.amazonaws.com/users (exige ASPNETCORE_PATHBASE=/users e OIDC em /users/.well-known/*)."
+  default     = ""
+}
+
+variable "users_api_jwt_audience" {
+  type        = list(string)
+  description = "Audiences aceitos (Jwt:Audience na Users API, ex.: fcg-cloud-platform)."
+  default     = ["fcg-cloud-platform"]
+}
+
+variable "jwt_authorizer_route_prefixes" {
+  type        = list(string)
+  description = "Prefixos de path (chaves de route_paths) que exigem JWT no gateway. Não incluir /users (login e OIDC públicos)."
+  default     = ["/games", "/payments"]
+}

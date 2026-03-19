@@ -56,3 +56,21 @@ variable "alb_target_port" {
   description = "Porta dos targets no ALB e na EC2 (ex.: 80)."
   default     = 80
 }
+
+variable "users_api_jwt_issuer" {
+  type        = string
+  description = "Jwt:Issuer na Users API (claim iss). Vazio = Terraform usa https://{api-id}.execute-api.{região}.amazonaws.com/users (recomendado com ASPNETCORE_PATHBASE=/users)."
+  default     = ""
+}
+
+variable "users_api_jwt_audience" {
+  type        = list(string)
+  description = "Jwt:Audience na Users API, Games API e Payments API (ex.: fcg-cloud-platform)."
+  default     = ["fcg-cloud-platform"]
+}
+
+variable "api_gateway_jwt_authorizer_enabled" {
+  type        = bool
+  description = "Habilita authorizer JWT no API Gateway para /games e /payments (exceto webhook público)."
+  default     = true
+}

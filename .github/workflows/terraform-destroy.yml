@@ -1,0 +1,99 @@
+# terraform-destroy.yml
+# APENAS manual (workflow_dispatch). Nunca dispara em push.
+# Remove os recursos gerenciados pelo state de production (EC2, VPC, API Gateway, etc.).
+# Não remove automaticamente o backend S3/DynamoDB do Bootstrap (state fica órfão até novo apply ou limpeza manual).
+
+name: Terraform Destroy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: "Digite exatamente DESTROY para confirmar remoção de toda a infra production"
+        required: true
+        type: string
+      run_destroy:
+        description: "false = só mostra o plan de destroy (dry-run). true = executa terraform destroy"
+        required: true
+        type: choice
+        options:
+          - "false"
+          - "true"
+        default: "false"
+
+env:
+  TF_WORKING_DIR: terraform/environments/production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: Destroy production
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Verificar confirmação
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "::error::Confirmação inválida. No campo confirm_destroy digite exatamente: DESTROY"
+            exit 1
+          fi
+          echo "Confirmação OK."
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
+      - name: Create terraform.tfvars (CI)
+        env:
+          TFVARS: ${{ secrets.TFVARS }}
+          TFVARS_B64: ${{ secrets.TFVARS_B64 }}
+        run: |
+          if [ -f terraform.tfvars ]; then
+            echo "Using existing terraform.tfvars from repo."
+          elif [ -n "$TFVARS" ]; then
+            echo "$TFVARS" > terraform.tfvars
+            echo "terraform.tfvars created from secret TFVARS (raw content)."
+          elif [ -n "$TFVARS_B64" ]; then
+            echo "$TFVARS_B64" | base64 -d > terraform.tfvars
+            echo "terraform.tfvars created from secret TFVARS_B64."
+          else
+            echo "::error::No terraform.tfvars found. Same requirements as Terraform Apply (README 2.3 / 13.5)."
+            exit 1
+          fi
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan (destroy)
+        run: |
+          terraform plan -destroy -no-color -input=false \
+            -var-file=terraform.tfvars \
+            -out=tfplan-destroy
+
+      - name: Terraform Destroy
+        if: github.event.inputs.run_destroy == 'true'
+        run: |
+          terraform apply -auto-approve -input=false tfplan-destroy
+
+      - name: Somente plan (dry-run)
+        if: github.event.inputs.run_destroy != 'true'
+        run: |
+          echo "::notice::run_destroy=false — nenhum recurso foi removido. Revise o plan acima. Para destruir, rode o workflow novamente com run_destroy=true e confirm_destroy=DESTROY."

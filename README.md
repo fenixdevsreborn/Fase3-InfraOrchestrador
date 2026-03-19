@@ -4,6 +4,8 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 **Variáveis e configuração:** seção **13** (variáveis do GitHub por repositório) e **14** (variáveis nas EC2 e no Terraform), com passo a passo detalhado.
 
+**Testes funcionais (Postman):** seção **15** — login, criação de usuário, criação de jogos e fluxo de compra via API Gateway.
+
 **Ordem de provisionamento:** seção **2.2** (ordem completa, do zero até o deploy das APIs). **Bootstrap (backend remoto):** seção **2.1**.
 
 ---
@@ -12,7 +14,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 - **Ambiente:** produção única; não se usa "prod" no nome dos recursos, apenas na tag `Environment`.
 - **Repositórios:** 1 repositório de infraestrutura (Terraform + workflows reutilizáveis) e 1 repositório por API: usersapi, gamesapi, paymentsapi.
-- **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço.
+- **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço. No gateway, **JWT authorizer** (issuer/audience da Users API + JWKS via OIDC) protege por padrão **/games** e **/payments**; **/users** permanece sem authorizer no edge (login e OIDC públicos). Webhook de pagamento tem rota **pública** dedicada (ver módulo `api-gateway` README).
 - **Compute:** uma instância EC2 privada por API (`fcg-fenix-usersapi-ec2`, `fcg-fenix-gamesapi-ec2`, `fcg-fenix-paymentsapi-ec2`). Em cada EC2 roda um container Docker (imagem ECR) com API .NET + PostgreSQL no mesmo container (build via `Dockerfile.postgres`).
 - **Registry:** um repositório ECR por API (`fcg-fenix-{service}-ecr`).
 - **Deploy:** GitHub Actions faz build da imagem, push no ECR e chama o workflow reutilizável do repositório de infraestrutura, que executa deploy remoto na EC2 via **SSM Run Command** (login ECR, atualização de `.env`, `docker compose pull` e `up -d`).
@@ -157,13 +159,42 @@ Ou com `-auto-approve` para não pedir confirmação:
 terraform apply -auto-approve -input=false -var-file=terraform.tfvars
 ```
 
+### Destruir infraestrutura (manual — parar consumo na AWS)
+
+O **Terraform Apply** e os deploys **não** removem a infra automaticamente. Para **derrubar tudo** o que está no state de `production` (VPC, EC2, ECR, ALB, API Gateway, etc.) e evitar custos contínuos:
+
+#### Opção A — GitHub Actions (recomendado)
+
+1. Repositório **Fase3-InfraOrchestrador** → **Actions** → workflow **`Terraform Destroy (manual)`** (`.github/workflows/terraform-destroy.yml`).
+2. **Run workflow** (escolha a branch correta, ex.: `master`).
+3. Preencha:
+   - **`confirm_destroy`:** digite exatamente **`DESTROY`** (maiúsculas).
+   - **`run_destroy`:** use **`false`** na primeira execução para ver só o **plan de destroy** (nada é removido). Depois rode de novo com **`true`** para aplicar o destroy.
+4. O job usa o environment **`production`** (pode exigir aprovadores no GitHub **Settings → Environments → production**).
+
+**Importante:**
+
+- O workflow **não dispara em push**; só **manual**.
+- O **Bootstrap** (bucket S3 `fcg-fenix-tfstate` e tabela DynamoDB de lock) costuma **não** estar no mesmo state de `production`; após o destroy, o state no S3 pode ficar referenciando recursos já apagados — avalie limpar ou recriar backend conforme `terraform/README.md`.
+- Imagens no **ECR** são removidas se estiverem no state; volumes/snapshots órfãos na AWS podem exigir revisão manual no console.
+
+#### Opção B — Máquina local (AWS CLI configurada)
+
+```bash
+cd terraform/environments/production
+terraform init
+terraform plan -destroy -var-file=terraform.tfvars
+# Conferir o plan e, se estiver correto:
+terraform destroy -var-file=terraform.tfvars
+```
+
 ---
 
 ## 5. Como funciona o CI/CD entre os repositórios
 
 - **Repositório de infraestrutura**  
   - Contém Terraform (VPC, ALB, EC2, ECR, IAM, SSM, API Gateway) e o workflow **reutilizável** de deploy em EC2 (`.github/workflows/deploy-ec2.yml`).  
-  - Workflows de Terraform: **Terraform Plan** (em PRs) e **Terraform Apply** (em push em `master` ou manual).
+  - Workflows de Terraform: **Terraform Plan** (em PRs), **Terraform Apply** (em push em `master` ou manual) e **Terraform Destroy (manual)** (só `workflow_dispatch`, para derrubar a infra e reduzir custos).
 
 - **Repositórios das APIs (usersapi, gamesapi, paymentsapi)**  
   - Cada um tem um workflow de deploy (ex.: `.github/workflows/deploy.yml`) que:  
@@ -400,7 +431,7 @@ Cada repositório precisa de **Variables** e **Secrets** configurados em **Setti
 
 ### 13.1 Repositório de infraestrutura (Fase3-InfraOrchestrador)
 
-Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
+Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply**, **Terraform Destroy (manual)** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
 
 | Tipo    | Nome            | Obrigatório | Descrição |
 |---------|-----------------|-------------|-----------|
@@ -419,7 +450,7 @@ Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform A
 3. **Variáveis do Terraform em CI** — escolha uma:
    - **Recomendado:** copie `terraform/environments/production/terraform.tfvars.example` para `terraform.tfvars` no mesmo diretório, preencha (ex.: `github_oidc_org = "fenixdevsreborn"`, `github_oidc_repos = ["fenixdevsreborn/Fase3-InfraOrchestrador", "fenixdevsreborn/Fase3-UsersAPI", "fenixdevsreborn/Fase3-GamesAPI", "fenixdevsreborn/Fase3-PaymentsAPI"]`) e **faça commit** do `terraform.tfvars`. Nada a configurar em Secrets.
    - **Ou** aba **Secrets**: **New repository secret** com nome `TFVARS` e valor = conteúdo completo do `terraform.tfvars` (cole o texto com quebras de linha). Alternativa: nome `TFVARS_B64` e valor = conteúdo em base64 (`base64 -w0 terraform.tfvars` no Linux/WSL).
-4. Salve. Os workflows **Terraform Bootstrap**, **Terraform Plan** e **Terraform Apply** usarão essas configurações. O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
+4. Salve. Os workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply** e **Terraform Destroy (manual)** usarão essas configurações. O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
 
 ---
 
@@ -796,18 +827,193 @@ Referência completa: `terraform/environments/production/terraform.tfvars.exampl
 
 | Contexto        | Onde fica        | Usado por |
 |-----------------|------------------|-----------|
-| GitHub (Infra)  | Settings → Actions → Variables / (opcional) Secrets | Terraform Plan, Terraform Apply |
+| GitHub (Infra)  | Settings → Actions → Variables / (opcional) Secrets | Terraform Plan, Terraform Apply, Terraform Destroy (manual) |
 | GitHub (APIs)   | Settings → Actions → Variables + Secrets | deploy.yml (build, push ECR, chamada ao reusable) |
 | EC2             | `/opt/fcg-fenix/{service}/.env` | docker-compose na EC2; SSM atualiza ECR_REGISTRY e IMAGE_TAG |
 | Terraform       | `terraform/environments/production/terraform.tfvars` | terraform plan/apply (local ou GitHub) |
 
 ---
 
-## 15. Alterações e recursos adicionados ao projeto
+## 15. Testes com Postman (login, usuário, jogos e compra)
+
+Esta seção descreve como validar o fluxo ponta a ponta usando **Postman** contra a **URL pública do API Gateway** (HTTP API, stage `$default`, sem prefixo de stage no path).
+
+### 15.1 Obter a base URL e configurar o Postman
+
+A **URL de invocação** é a mesma em todos os métodos abaixo (formato típico: `https://{api-id}.execute-api.{região}.amazonaws.com`, **sem** barra no final).
+
+#### Opção A — Terraform (CLI)
+
+Com o Terraform aplicado, na raiz do repositório de infra:
+
+```bash
+cd terraform/environments/production
+terraform output -raw api_gateway_invoke_url
+```
+
+#### Opção B — Console da AWS
+
+1. Entre no [Console da AWS](https://console.aws.amazon.com/) com a conta e a **região corretas** (ex.: **Norte da Virgínia / us-east-1**), a mesma em que a infra foi provisionada.
+2. Abra o serviço **API Gateway** (barra de busca no topo: *API Gateway*).
+3. No painel esquerdo, em **APIs**, certifique-se de estar em **HTTP APIs** (este projeto usa **HTTP API**, não “REST API” antiga).
+4. Clique na API cujo nome segue o padrão do Terraform: **`fcg-fenix-main-apigw`** (ou o nome definido pelo módulo; a tag **Name** também ajuda a identificar).
+5. No menu da API, aba **Stages** (etapas).
+6. Selecione o stage **`$default`** (deploy automático; a URL **não** inclui `/` + nome de stage no path).
+7. Copie o campo **Invoke URL** (URL de invocação). Exemplo: `https://abc123xyz.execute-api.us-east-1.amazonaws.com` — use essa string como base no Postman (variável `gateway`), **sem** acrescentar barra no final.
+
+> **Dica:** Se não encontrar a API, confira a região (canto superior direito do console) e permissões IAM (`apigateway:GET`). Também é possível localizar pelo **API ID** no output do Terraform, se exposto em outros outputs ou no state.
+
+#### Postman — variáveis e headers
+
+1. No Postman, crie um **Environment** com as variáveis:
+   | Variável | Valor inicial | Uso |
+   |----------|----------------|-----|
+   | `gateway` | saída do Terraform ou **Invoke URL** do console (§ Opção B) | URL base de todas as requisições |
+   | `accessToken` | *(vazio)* | Preencher após o login (Bearer JWT) |
+   | `adminToken` | *(vazio)* | Token de um usuário **admin** (criação de usuário e de jogo) |
+   | `gameId` | *(vazio)* | GUID retornado ao criar jogo |
+   | `paymentId` | *(vazio)* | GUID retornado ao criar pagamento |
+
+2. **Header padrão** (coleção ou pasta, exceto no login):
+   - `Authorization`: `Bearer {{adminToken}}` ou `Bearer {{accessToken}}` conforme o passo (veja abaixo).
+   - `Content-Type`: `application/json`
+
+### 15.2 Convenção de path (API Gateway + ALB)
+
+O API Gateway expõe três prefixos: **`/users`**, **`/games`**, **`/payments`**, cada um roteado para o microsserviço correspondente. O path completo enviado ao backend é o mesmo que você usa na URL (ex.: `POST {{gateway}}/users/auth/login`).
+
+**Importante:** as APIs ASP.NET usam rotas como `/auth/login`, `/users`, `/games`, etc. Para que `.../users/auth/login` funcione atrás do prefixo `/users`, cada container em EC2 deve tratar o path base (ex.: variável de ambiente **`ASPNETCORE_PATHBASE=/users`** na **Users API**, **`/games`** na **Games API**, **`/payments`** na **Payments API**), conforme [PathBase no ASP.NET Core](https://learn.microsoft.com/aspnet/core/host-and-deploy/proxy-load-balancer). Se o login ou outras rotas retornarem **404**, confira esse ponto nos arquivos `.env` / `docker-compose` da EC2.
+
+**Teste local (sem gateway):** se cada API roda em `http://localhost:8080` com `docker compose`, use os paths **sem** o prefixo duplo (ex.: `POST http://localhost:8080/auth/login` na Users API).
+
+### 15.3 Fluxo 1 — Login (usuário comum)
+
+Obtenha o JWT emitido pela **Users API** (necessário para Games e Payments).
+
+| Campo | Valor |
+|--------|--------|
+| **Método** | `POST` |
+| **URL** | `{{gateway}}/users/auth/login` |
+| **Auth** | Nenhuma (endpoint público) |
+| **Body** (raw JSON) | Ver abaixo |
+
+```json
+{
+  "login": "admin@fcg.local",
+  "password": "ChangeMe@123"
+}
+```
+
+- **`login`**: e-mail **ou** username cadastrado.
+- **`password`**: senha do usuário.
+
+Na resposta **200**, o JSON inclui o campo **`accessToken`** (JWT). Copie esse valor para a variável **`{{accessToken}}`** do Postman (e, se for admin, também para **`{{adminToken}}`** ao testar criação de usuário/jogo).
+
+> **Primeiro acesso:** se o ambiente ainda não tiver admin, a Users API pode criar um admin padrão no bootstrap; use as credenciais documentadas no README da **Fase3-UsersAPI** ou um usuário que você já tenha criado.
+
+### 15.4 Fluxo 2 — Criar usuário (somente admin)
+
+| Campo | Valor |
+|--------|--------|
+| **Método** | `POST` |
+| **URL** | `{{gateway}}/users/users` |
+| **Authorization** | `Bearer {{adminToken}}` |
+| **Body** (raw JSON) | Ver abaixo |
+
+```json
+{
+  "name": "Comprador Teste",
+  "username": "comprador01",
+  "email": "comprador01@fcg.local",
+  "password": "SenhaSegura@123",
+  "role": "user",
+  "isActive": true
+}
+```
+
+- Use um **`{{adminToken}}`** obtido com login de usuário com claim **admin** (pode ser o mesmo login da seção 15.3 se for admin).
+- Resposta **201**: guardar o `id` do usuário se precisar de rastreio; para compras basta o token do **usuário comum** após login.
+
+**Login como usuário criado:** novo request `POST {{gateway}}/users/auth/login` com `login` = e-mail ou username do usuário criado e a senha definida; copie o token para **`{{accessToken}}`**.
+
+### 15.5 Fluxo 3 — Criar jogo (somente admin na Games API)
+
+| Campo | Valor |
+|--------|--------|
+| **Método** | `POST` |
+| **URL** | `{{gateway}}/games/games` |
+| **Authorization** | `Bearer {{adminToken}}` |
+| **Body** (raw JSON) | Ver abaixo |
+
+```json
+{
+  "title": "Jogo Postman Demo",
+  "description": "Catálogo de teste",
+  "genre": "Ação",
+  "studio": "FCG Studio",
+  "price": 49.90,
+  "coverUrl": "https://example.com/cover.jpg",
+  "tags": ["demo", "fiap"],
+  "isPublished": true,
+  "isActive": true
+}
+```
+
+- Resposta **201**: copie o **`id`** (GUID) do jogo para **`{{gameId}}`**.
+- As APIs **Games** e **Payments** devem estar configuradas com o **mesmo emissor/audiência/chave (ou JWKS)** que a **Users API**, para o JWT ser aceito.
+
+### 15.6 Fluxo 4 — Comprar jogo (pagamento + confirmação)
+
+Existem dois caminhos na plataforma:
+
+**A) Via Payments API (recomendado para teste integrado)**  
+Cria o registro de pagamento e depois confirma (simula conclusão da compra).
+
+1. **Criar pagamento**  
+
+   | Campo | Valor |
+   |--------|--------|
+   | **Método** | `POST` |
+   | **URL** | `{{gateway}}/payments/payments` |
+   | **Authorization** | `Bearer {{accessToken}}` (usuário que está comprando) |
+   | **Body** | `{"gameId": "{{gameId}}", "currency": "BRL"}` |
+
+   Use o valor real do GUID em `gameId` (Postman substitui `{{gameId}}`). Copie o **`id`** do pagamento retornado para **`{{paymentId}}`**.
+
+2. **Confirmar pagamento**  
+
+   | Campo | Valor |
+   |--------|--------|
+   | **Método** | `POST` |
+   | **URL** | `{{gateway}}/payments/payments/{{paymentId}}/confirm` |
+   | **Authorization** | `Bearer {{accessToken}}` |
+   | **Body** | `{}` ou `{"idempotencyKey": "postman-001"}` (opcional) |
+
+**B) Via Games API (`purchase`)**  
+Endpoint direto na Games API (comportamento conforme implementação atual):
+
+| Campo | Valor |
+|--------|--------|
+| **Método** | `POST` |
+| **URL** | `{{gateway}}/games/games/{{gameId}}/purchase` |
+| **Authorization** | `Bearer {{accessToken}}` |
+
+Sem body. Ajuste `gameId` na URL. Se já existir integração com Payments, o fluxo pode retornar URL de checkout ou intenção de compra — consulte a documentação OpenAPI/Scalar da **Fase3-GamesAPI**.
+
+### 15.7 Conferências rápidas
+
+- **Health:** `GET {{gateway}}/users/health` (Users); equivalente `/games/health` e `/payments/health` nos outros serviços, se expostos.
+- **CORS:** o API Gateway está configurado com CORS amplo nos módulos Terraform; se testar do browser, verifique políticas adicionais.
+- **Erro 401/403:** token ausente, expirado ou usuário sem role **admin** nas rotas administrativas.
+- **Erro 404 em `/users/...`:** path base na EC2 ou prefixo da URL; revise a seção **15.2**.
+
+---
+
+## 16. Alterações e recursos adicionados ao projeto
 
 Esta seção resume o que foi incorporado ao repositório para permitir provisionamento completo via GitHub Actions (backend remoto, Bootstrap, ECR e demais recursos criados pelo Terraform) e deploy das APIs sem configuração manual de repositórios ECR.
 
-### 15.1 Bootstrap do backend remoto
+### 16.1 Bootstrap do backend remoto
 
 - **Workflow:** `.github/workflows/terraform-bootstrap.yml`  
   - **Nome no Actions:** Terraform Bootstrap (Backend S3 + DynamoDB).  
@@ -816,20 +1022,20 @@ Esta seção resume o que foi incorporado ao repositório para permitir provisio
   - **Requisitos:** variável `AWS_ROLE_ARN` (e opcionalmente `AWS_REGION`) no repositório de infra.  
   - **Documentação detalhada:** seção 2.2.
 
-### 15.2 Backend Terraform habilitado
+### 16.2 Backend Terraform habilitado
 
 - **Arquivo:** `terraform/environments/production/backend.tf`  
   - Bloco `backend "s3"` **ativo**, com bucket `fcg-fenix-tfstate`, key `production/terraform.tfstate`, região `us-east-1`, tabela de lock `fcg-fenix-tfstate-lock`, `encrypt = true`.  
   - Permite que Terraform Plan e Apply no GitHub Actions usem state remoto (sem criar bucket/tabela manualmente antes, desde que o Bootstrap tenha sido executado).
 
-### 15.3 Variáveis Terraform em CI (terraform.tfvars)
+### 16.3 Variáveis Terraform em CI (terraform.tfvars)
 
 - **Workflows afetados:** `terraform-plan.yml`, `terraform-apply.yml`.  
   - Novo passo **"Create terraform.tfvars from secret (CI)"**: se o secret **`TFVARS_B64`** estiver definido, o conteúdo é decodificado de base64 e escrito em `terraform.tfvars` no diretório de trabalho; se não houver secret nem arquivo versionado, o job falha com mensagem orientando a configurar `TFVARS_B64`.  
   - Permite rodar Plan e Apply em CI sem versionar `terraform.tfvars` no repositório.  
   - **Documentação:** seções 13.1, 13.5 e 14.2.
 
-### 15.4 Workflows de deploy das APIs (deploy.yml)
+### 16.4 Workflows de deploy das APIs (deploy.yml)
 
 - **Repositórios:** Fase3-UsersAPI, Fase3-GamesAPI, Fase3-PaymentsAPI.  
   - **Job `deploy`:** passou a chamar o reusable workflow com **`uses:` em valor literal** (ex.: `fenixdevsreborn/Fase3-InfraOrchestrador/.github/workflows/deploy-ec2.yml@master`) em vez de expressão `${{ vars.INFRA_REPO }}/...`, para evitar erro de "workflow not found" no GitHub.  
@@ -837,7 +1043,7 @@ Esta seção resume o que foi incorporado ao repositório para permitir provisio
   - **`service`** no `with:` passou a valor literal (`usersapi`, `gamesapi`, `paymentsapi`) em vez de `${{ env.SERVICE }}`, pois no contexto do job de reusable o GitHub não reconhece `env` nesse ponto.  
   - Com isso, o deploy (push na branch configurada) consegue fazer push no ECR e chamar o reusable para deploy na EC2.
 
-### 15.5 Role OIDC (Trust e Permission policy)
+### 16.5 Role OIDC (Trust e Permission policy)
 
 - **Trust policy:** documentada na seção 13.4; deve incluir o owner correto (ex.: `fenixdevsreborn`) para os repositórios Fase3-InfraOrchestrador, Fase3-UsersAPI, Fase3-GamesAPI, Fase3-PaymentsAPI.  
 - **Permission policy:**  
@@ -846,12 +1052,13 @@ Esta seção resume o que foi incorporado ao repositório para permitir provisio
   - **iam:CreateServiceLinkedRole** restrito a ARNs e condição **`iam:AWSServiceName`** (ex.: ec2, elasticloadbalancing), conforme recomendações da AWS.  
   - Escopo documentado na seção 13.4 (quem usa o quê: Infra vs. APIs).
 
-### 15.6 Documentação
+### 16.6 Documentação
 
 - **README.md (este arquivo):**  
   - Seção **2.1** — Ordem completa de provisionamento (do zero ao deploy).  
   - Seção **2.2** — Bootstrap do backend remoto (passo a passo, o que cria, pré-requisitos, como executar e verificar).  
   - Seções **2.3** e **2.4** — Pré-requisitos e ordem de provisionamento Terraform.  
+  - Seção **15** — Testes com Postman (login, usuário, jogos, compra via API Gateway).  
   - Seção **13.1** — Inclusão do secret `TFVARS_B64` e passo a passo para Infra.  
   - Seção **13.2** — Ajuste para deploy com repositório em literal; tabela de Variables/Secrets das APIs.  
   - Seção **13.3** — Resumo atualizado com `TFVARS_B64`.  
@@ -863,8 +1070,10 @@ Esta seção resume o que foi incorporado ao repositório para permitir provisio
 ## Referências rápidas
 
 - **Ordem de provisionamento e Bootstrap:** seções **2.1** (ordem completa) e **2.2** (Bootstrap passo a passo).  
+- **Destruir infra manualmente (Actions ou CLI):** seção **4** (subsection *Destruir infraestrutura*).  
 - **Variables e Secrets (consolidado):** seção **13.5**; detalhes por repo em **13.1** (Infra) e **13.2** (APIs). **Role OIDC (trust + permission policy):** seção **13.4**.  
-- **O que foi adicionado ao projeto:** seção **15**.  
+- **Testes com Postman (login, usuário, jogos, compra):** seção **15**.  
+- **O que foi adicionado ao projeto:** seção **16**.  
 - **Estratégia de deploy (EC2, compose, .env, SSM, rollback, Postgres):** `docs/deploy-estrategia-operacional-ec2.md`  
 - **Exemplos de arquivos para EC2:** `docs/ec2-examples/` (README + docker-compose, .env.example, deploy.sh por serviço)  
 - **Arquitetura e convenções:** `docs/01-arquitetura-e-convencoes.md`  

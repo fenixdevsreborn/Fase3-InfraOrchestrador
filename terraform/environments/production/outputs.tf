@@ -25,6 +25,16 @@ output "api_gateway_invoke_url" {
   description = "URL de invocação da HTTP API ($default stage)."
 }
 
+output "api_gateway_access_log_group_name" {
+  value       = module.api_gateway.access_log_group_name
+  description = "CloudWatch Log Group dos access logs da API Gateway HTTP (fcg-fenix-main-apigw)."
+}
+
+output "api_gateway_jwt_issuer_effective" {
+  value       = module.api_gateway.users_jwt_issuer_effective
+  description = "Issuer JWT configurado no API Gateway; use o mesmo valor em Jwt__Issuer na Users API (e alinhado em Games/Payments)."
+}
+
 output "ecr_repository_urls" {
   value       = module.ecr.repository_urls
   description = "Map service -> URL do repositório ECR."
