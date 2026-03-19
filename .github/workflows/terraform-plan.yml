@@ -10,6 +10,7 @@ on:
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform-plan.yml'
+  workflow_dispatch:
 
 env:
   TF_WORKING_DIR: terraform/environments/production
