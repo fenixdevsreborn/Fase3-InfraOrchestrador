@@ -71,6 +71,9 @@ variable "users_api_jwt_audience" {
 
 variable "api_gateway_jwt_authorizer_enabled" {
   type        = bool
-  description = "Habilita authorizer JWT no API Gateway para /games e /payments (exceto webhook público)."
-  default     = true
+  description = <<-EOT
+    Habilita authorizer JWT no API Gateway (/games, /payments). A AWS exige que {issuer}/.well-known/openid-configuration já funcione no apply.
+    Use false no primeiro deploy; após Users API publicar OIDC na URL do issuer, defina true e rode Apply de novo.
+  EOT
+  default     = false
 }

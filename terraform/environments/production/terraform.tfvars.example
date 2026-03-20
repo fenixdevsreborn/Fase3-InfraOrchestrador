@@ -24,7 +24,8 @@ github_oidc_repos = [
 instance_type   = "t3.micro"
 alb_target_port = 80
 
-# JWT no API Gateway (rotas /games e /payments). Deixe issuer vazio para usar URL automática ...amazonaws.com/users
+# JWT no API Gateway (opcional). Default false = Apply nunca quebra por OIDC.
+# Para ligar depois da Users API: workflow "Enable API Gateway JWT" ou scripts/wait-oidc-and-enable-apigw-jwt.*
 # users_api_jwt_issuer = ""
 # users_api_jwt_audience = ["fcg-cloud-platform"]
 # api_gateway_jwt_authorizer_enabled = true

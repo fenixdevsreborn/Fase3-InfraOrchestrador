@@ -17,6 +17,7 @@ Variáveis opcionais: `api_gateway_access_log_retention_days`, `api_gateway_deta
 
 ### Autorização JWT (Users API)
 
+- **Importante:** na criação do authorizer, a **AWS chama** `{issuer}/.well-known/openid-configuration`. Se retornar 404 ou JSON inválido, o `terraform apply` **falha**. Por isso `jwt_authorizer_enabled` vem **false** por padrão: suba a Users API com `Jwt__Issuer` e `ASPNETCORE_PATHBASE=/users` alinhados ao issuer, teste a URL no browser/curl, e só então defina `jwt_authorizer_enabled = true` e rode outro apply.
 - **Authorizer** `JWT` no API Gateway valida `Authorization: Bearer` com **issuer** + **audience** e chaves via **OIDC discovery** (`{issuer}/.well-known/openid-configuration`).
 - **Rotas protegidas (default):** `/games`, `/games/{proxy+}`, `/payments`, `/payments/{proxy+}`.
 - **Rotas sem JWT no gateway:** `/users` e `/users/{proxy+}` (login `auth/login`, OIDC, health, etc.).

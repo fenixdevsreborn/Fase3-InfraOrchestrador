@@ -1,0 +1,94 @@
+# Aguarda a Users API publicar OIDC e aplica Terraform com JWT no API Gateway.
+# Use DEPOIS de: infra aplicada (com jwt desligado) + Users API deployada com PathBase /users e Jwt__Issuer correto.
+# Não dispara em push — só workflow_dispatch.
+
+name: Enable API Gateway JWT (wait OIDC + apply)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_wait_minutes:
+        description: "Tempo máximo de espera pelo endpoint OIDC (minutos)"
+        required: false
+        default: "20"
+
+env:
+  TF_WORKING_DIR: terraform/environments/production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  enable-jwt:
+    name: Wait OIDC and apply JWT authorizer
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
+      - name: Create terraform.tfvars (CI)
+        env:
+          TFVARS: ${{ secrets.TFVARS }}
+          TFVARS_B64: ${{ secrets.TFVARS_B64 }}
+        run: |
+          if [ -f terraform.tfvars ]; then
+            echo "Using existing terraform.tfvars from repo."
+          elif [ -n "$TFVARS" ]; then
+            echo "$TFVARS" > terraform.tfvars
+          elif [ -n "$TFVARS_B64" ]; then
+            echo "$TFVARS_B64" | base64 -d > terraform.tfvars
+          else
+            echo "::error::No terraform.tfvars (same as Terraform Apply)."
+            exit 1
+          fi
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Aguardar OIDC da Users API (via invoke URL do state)
+        env:
+          MAX_WAIT_MINUTES: ${{ github.event.inputs.max_wait_minutes }}
+        run: |
+          set -e
+          INVOKE_URL="$(terraform output -raw api_gateway_invoke_url)"
+          INVOKE_URL="${INVOKE_URL%/}"
+          OIDC_URL="${INVOKE_URL}/users/.well-known/openid-configuration"
+          echo "Testando: $OIDC_URL"
+          MAX_SEC=$(( MAX_WAIT_MINUTES * 60 ))
+          ELAPSED=0
+          SLEEP=15
+          while [ "$ELAPSED" -lt "$MAX_SEC" ]; do
+            if curl -sfS --max-time 30 "$OIDC_URL" -o /dev/null; then
+              echo "OIDC respondeu."
+              exit 0
+            fi
+            echo "Ainda sem OIDC (${ELAPSED}s / ${MAX_SEC}s). Aguardando ${SLEEP}s..."
+            sleep "$SLEEP"
+            ELAPSED=$((ELAPSED + SLEEP))
+          done
+          echo "::error::Timeout: ${OIDC_URL} não ficou disponível. Confira Users API, PathBase /users e Jwt__Issuer."
+          exit 1
+
+      - name: Terraform Apply (habilitar JWT no gateway)
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var-file=terraform.tfvars \
+            -var=api_gateway_jwt_authorizer_enabled=true

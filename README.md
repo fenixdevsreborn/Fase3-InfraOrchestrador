@@ -14,7 +14,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 - **Ambiente:** produção única; não se usa "prod" no nome dos recursos, apenas na tag `Environment`.
 - **Repositórios:** 1 repositório de infraestrutura (Terraform + workflows reutilizáveis) e 1 repositório por API: usersapi, gamesapi, paymentsapi.
-- **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço. No gateway, **JWT authorizer** (issuer/audience da Users API + JWKS via OIDC) protege por padrão **/games** e **/payments**; **/users** permanece sem authorizer no edge (login e OIDC públicos). Webhook de pagamento tem rota **pública** dedicada (ver módulo `api-gateway` README).
+- **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço. **JWT authorizer** em `/games` e `/payments` é **opcional** (`api_gateway_jwt_authorizer_enabled`, default **false**): a AWS valida o OIDC na criação; ative só quando `{issuer}/.well-known/openid-configuration` estiver respondendo (ver README do módulo `api-gateway`). **/users** segue sem authorizer no edge quando o JWT do gateway está desligado. Webhook de pagamento tem rota pública dedicada (módulo `api-gateway`).
 - **Compute:** uma instância EC2 privada por API (`fcg-fenix-usersapi-ec2`, `fcg-fenix-gamesapi-ec2`, `fcg-fenix-paymentsapi-ec2`). Em cada EC2 roda um container Docker (imagem ECR) com API .NET + PostgreSQL no mesmo container (build via `Dockerfile.postgres`).
 - **Registry:** um repositório ECR por API (`fcg-fenix-{service}-ecr`).
 - **Deploy:** GitHub Actions faz build da imagem, push no ECR e chama o workflow reutilizável do repositório de infraestrutura, que executa deploy remoto na EC2 via **SSM Run Command** (login ECR, atualização de `.env`, `docker compose pull` e `up -d`).
@@ -158,6 +158,29 @@ Ou com `-auto-approve` para não pedir confirmação:
 ```bash
 terraform apply -auto-approve -input=false -var-file=terraform.tfvars
 ```
+
+### Apply falhou: `CreateAuthorizer` / `Invalid issuer` / OpenID discovery
+
+Se o log do Actions mostrar erro ao criar o authorizer JWT (ex.: *Issuer must have a valid discovery endpoint* ao acessar `.../users/.well-known/openid-configuration`):
+
+1. No `terraform.tfvars`, defina **`api_gateway_jwt_authorizer_enabled = false`** (ou remova `true` se tiver sido ativado manualmente) e rode **Apply** de novo — isso aplica logs/métricas/outras mudanças **sem** criar o authorizer.
+2. Garanta que a **Users API** esteja acessível pelo API Gateway com **`Jwt__Issuer`** igual ao issuer efetivo (veja `terraform output api_gateway_jwt_issuer_effective` após o apply) e **`ASPNETCORE_PATHBASE=/users`** para o OIDC existir em `/users/.well-known/openid-configuration`.
+3. Teste no navegador ou `curl` a URL de discovery até retornar **200** e JSON válido.
+4. Então defina **`api_gateway_jwt_authorizer_enabled = true`** e execute **Apply** outra vez.
+
+### Formas mais fáceis (JWT no API Gateway)
+
+1. **Mais simples — não usar JWT no gateway**  
+   Mantenha **`api_gateway_jwt_authorizer_enabled = false`** (default). As APIs **Games** e **Payments** já validam o Bearer JWT no ASP.NET; o gateway só encaminha. Você evita o problema da AWS com OIDC no `apply` e reduz complexidade.
+
+2. **Um clique no GitHub depois da Users API no ar**  
+   Workflow **`Enable API Gateway JWT (wait OIDC + apply)`** (`.github/workflows/terraform-enable-apigw-jwt.yml`): só **`workflow_dispatch`**. Ele lê o `api_gateway_invoke_url` do Terraform, **espera** `.../users/.well-known/openid-configuration` responder e roda **`terraform apply`** com **`-var=api_gateway_jwt_authorizer_enabled=true`** (sobrescreve o tfvars só nessa variável). Ajuste **max_wait_minutes** se o deploy da Users demorar.
+
+3. **Na sua máquina (AWS + Terraform já configurados)**  
+   - Bash (Linux/macOS/WSL): `scripts/wait-oidc-and-enable-apigw-jwt.sh [minutos]`  
+   - PowerShell: `.\scripts\wait-oidc-and-enable-apigw-jwt.ps1 -MaxMinutes 20`  
+
+   Ambos assumem `terraform.tfvars` em `terraform/environments/production`.
 
 ### Destruir infraestrutura (manual — parar consumo na AWS)
 
@@ -431,7 +454,7 @@ Cada repositório precisa de **Variables** e **Secrets** configurados em **Setti
 
 ### 13.1 Repositório de infraestrutura (Fase3-InfraOrchestrador)
 
-Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply**, **Terraform Destroy (manual)** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
+Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply**, **Terraform Destroy (manual)**, **Enable API Gateway JWT (wait OIDC + apply)** e pelo **Deploy EC2 (reusable)** quando chamado pelos repos das APIs (o reusable recebe o secret repassado pelo caller).
 
 | Tipo    | Nome            | Obrigatório | Descrição |
 |---------|-----------------|-------------|-----------|
@@ -450,7 +473,7 @@ Usado pelos workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform A
 3. **Variáveis do Terraform em CI** — escolha uma:
    - **Recomendado:** copie `terraform/environments/production/terraform.tfvars.example` para `terraform.tfvars` no mesmo diretório, preencha (ex.: `github_oidc_org = "fenixdevsreborn"`, `github_oidc_repos = ["fenixdevsreborn/Fase3-InfraOrchestrador", "fenixdevsreborn/Fase3-UsersAPI", "fenixdevsreborn/Fase3-GamesAPI", "fenixdevsreborn/Fase3-PaymentsAPI"]`) e **faça commit** do `terraform.tfvars`. Nada a configurar em Secrets.
    - **Ou** aba **Secrets**: **New repository secret** com nome `TFVARS` e valor = conteúdo completo do `terraform.tfvars` (cole o texto com quebras de linha). Alternativa: nome `TFVARS_B64` e valor = conteúdo em base64 (`base64 -w0 terraform.tfvars` no Linux/WSL).
-4. Salve. Os workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply** e **Terraform Destroy (manual)** usarão essas configurações. O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
+4. Salve. Os workflows **Terraform Bootstrap**, **Terraform Plan**, **Terraform Apply**, **Terraform Destroy (manual)** e **Enable API Gateway JWT** usarão essas configurações. O reusable `deploy-ec2.yml` usa `secrets.AWS_ROLE_ARN` **repassado pelo repositório que chama** (cada API repassa seu secret).
 
 ---
 
@@ -827,7 +850,7 @@ Referência completa: `terraform/environments/production/terraform.tfvars.exampl
 
 | Contexto        | Onde fica        | Usado por |
 |-----------------|------------------|-----------|
-| GitHub (Infra)  | Settings → Actions → Variables / (opcional) Secrets | Terraform Plan, Terraform Apply, Terraform Destroy (manual) |
+| GitHub (Infra)  | Settings → Actions → Variables / (opcional) Secrets | Terraform Plan, Apply, Destroy (manual), Enable API Gateway JWT |
 | GitHub (APIs)   | Settings → Actions → Variables + Secrets | deploy.yml (build, push ECR, chamada ao reusable) |
 | EC2             | `/opt/fcg-fenix/{service}/.env` | docker-compose na EC2; SSM atualiza ECR_REGISTRY e IMAGE_TAG |
 | Terraform       | `terraform/environments/production/terraform.tfvars` | terraform plan/apply (local ou GitHub) |
@@ -1071,6 +1094,7 @@ Esta seção resume o que foi incorporado ao repositório para permitir provisio
 
 - **Ordem de provisionamento e Bootstrap:** seções **2.1** (ordem completa) e **2.2** (Bootstrap passo a passo).  
 - **Destruir infra manualmente (Actions ou CLI):** seção **4** (subsection *Destruir infraestrutura*).  
+- **Habilitar JWT no API Gateway após Users API:** workflow **Enable API Gateway JWT** ou `scripts/wait-oidc-and-enable-apigw-jwt.*` (seção **4**, *Formas mais fáceis*).  
 - **Variables e Secrets (consolidado):** seção **13.5**; detalhes por repo em **13.1** (Infra) e **13.2** (APIs). **Role OIDC (trust + permission policy):** seção **13.4**.  
 - **Testes com Postman (login, usuário, jogos, compra):** seção **15**.  
 - **O que foi adicionado ao projeto:** seção **16**.  

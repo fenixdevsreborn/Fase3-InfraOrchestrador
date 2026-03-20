@@ -87,8 +87,12 @@ variable "api_gateway_data_trace_enabled" {
 
 variable "jwt_authorizer_enabled" {
   type        = bool
-  description = "Se true, exige JWT válido (issuer + audience + JWKS) nas rotas listadas em jwt_authorizer_route_prefixes."
-  default     = true
+  description = <<-EOT
+    Se true, exige JWT nas rotas de jwt_authorizer_route_prefixes.
+    A AWS valida o issuer na criação: a URL {issuer}/.well-known/openid-configuration deve responder 200 com JSON OIDC válido.
+    Mantenha false até a Users API estar no ar com Jwt__Issuer + PathBase alinhados ao issuer; depois true e novo apply.
+  EOT
+  default     = false
 }
 
 variable "users_api_jwt_issuer" {
