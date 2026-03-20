@@ -54,6 +54,14 @@ resource "aws_instance" "api" {
   user_data                   = local.user_data
   user_data_replace_on_change = true
 
+  # IMDSv2 obrigatório (recomendação AWS; reduz risco de SSRF contra metadata).
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "disabled"
+  }
+
   root_block_device {
     volume_size = var.root_volume_size
     volume_type = "gp3"

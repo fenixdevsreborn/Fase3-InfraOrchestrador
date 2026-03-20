@@ -4,7 +4,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 **Variáveis e configuração:** seção **13** (variáveis do GitHub por repositório) e **14** (variáveis nas EC2 e no Terraform), com passo a passo detalhado.
 
-**Testes funcionais (Postman):** seção **15** — login, criação de usuário, criação de jogos e fluxo de compra via API Gateway. **502 no gateway:** seção **15.0** (porta 80 na EC2, health `/health`, target healthy).
+**Testes funcionais (Postman):** seção **15** — login, criação de usuário, criação de jogos e fluxo de compra via API Gateway. **502 no gateway:** seção **15.0** (porta 80 na EC2, health `/health`, target healthy). **EC2 privada / container:** seção **9** (*Acesso à EC2 privada e ao container*).
 
 **Ordem de provisionamento:** seção **2.2** (ordem completa, do zero até o deploy das APIs). **Bootstrap (backend remoto):** seção **2.1**.
 
@@ -15,7 +15,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 - **Ambiente:** produção única; não se usa "prod" no nome dos recursos, apenas na tag `Environment`.
 - **Repositórios:** 1 repositório de infraestrutura (Terraform + workflows reutilizáveis) e 1 repositório por API: usersapi, gamesapi, paymentsapi.
 - **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço. **JWT authorizer** em `/games` e `/payments` é **opcional** (`api_gateway_jwt_authorizer_enabled`, default **false**): a AWS valida o OIDC na criação; ative só quando `{issuer}/.well-known/openid-configuration` estiver respondendo (ver README do módulo `api-gateway`). **/users** segue sem authorizer no edge quando o JWT do gateway está desligado. Webhook de pagamento tem rota pública dedicada (módulo `api-gateway`).
-- **Compute:** uma instância EC2 privada por API (`fcg-fenix-usersapi-ec2`, `fcg-fenix-gamesapi-ec2`, `fcg-fenix-paymentsapi-ec2`). Em cada EC2 roda um container Docker (imagem ECR) com API .NET + PostgreSQL no mesmo container (build via `Dockerfile.postgres`).
+- **Compute:** uma instância EC2 **privada** (sem IP público) por API (`fcg-fenix-usersapi-ec2`, etc.). Tipo padrão no Terraform: **`t3.nano`** (menor custo x86 burstable; se API+Postgres no mesmo container faltar RAM, use **`t3.micro`** em `instance_type`). **IMDSv2 obrigatório** (`http_tokens = required`) nas instâncias criadas/atualizadas pelo módulo EC2. Acesso administrativo: **SSM Session Manager** (sem SSH público). Em cada EC2 roda Docker com API .NET + PostgreSQL no mesmo container (`Dockerfile.postgres`).
 - **Registry:** um repositório ECR por API (`fcg-fenix-{service}-ecr`).
 - **Deploy:** GitHub Actions faz build da imagem, push no ECR e chama o workflow reutilizável do repositório de infraestrutura, que executa deploy remoto na EC2 via **SSM Run Command** (login ECR, atualização de `.env`, `docker compose pull` e `up -d`).
 - **Autenticação AWS:** OIDC (GitHub Actions assume role IAM sem chaves estáticas).
@@ -361,6 +361,33 @@ aws ec2 describe-instances \
 **Console AWS:** EC2 → Instances → filtros por tag: `Name = fcg-fenix-usersapi-ec2` ou `Service = usersapi` e `Project = fcg-fenix`.
 
 O **SSM Session Manager** lista as instâncias por nome; escolha a que tiver o `Name` correspondente ao serviço.
+
+### Acesso à EC2 privada e ao container (sem IP público)
+
+Não é necessário IP público nem bastion para operar as instâncias:
+
+1. **Pré-requisitos (já cobertos pelo Terraform deste repo)**  
+   - Role da EC2 com **`AmazonSSMManagedInstanceCore`** (Session Manager + Run Command).  
+   - **Amazon Linux 2** com **SSM Agent** (já instalado).  
+   - **Saída para a internet** (ex.: **NAT Gateway** na VPC) para o agente falar com os endpoints do Systems Manager na região. *Sem NAT*, seria preciso criar **VPC endpoints** de interface para SSM / EC2 Messages / SSMMessages.
+
+2. **Abrir shell na instância**  
+   - Console **AWS → EC2 → Instances** → selecione `fcg-fenix-usersapi-ec2` (ou games/payments) → botão **Connect** → aba **Session Manager** → **Connect**.  
+   - Ou **Systems Manager → Session Manager → Start session** → escolha a instância pelo nome.
+
+3. **Comandos úteis no container (após conectar)**  
+   ```bash
+   sudo docker ps
+   sudo docker logs fcg-fenix-usersapi --tail 100
+   cd /opt/fcg-fenix/usersapi && sudo docker compose ps
+   curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:80/health
+   ```
+
+4. **“Gerenciado: falso” no console**  
+   Às vezes o painel da instância ainda não mostra como gerenciada até o **SSM Agent** registrar (alguns minutos após o boot). Se após ~10 min continuar sem sessão, confira a role, o NAT e **Fleet Manager → Managed instances**.
+
+5. **Sobre “1 núcleo”**  
+   Na AWS, **`t3.nano`** é a opção burstable **mais barata** usual em x86; o spec lista **2 vCPU** compartilhados (créditos). Não há instância atual “nano” com 1 vCPU dedicado na família t3; **`t2.nano`** tem **1 vCPU** mas é geração antiga — prefira **`t3.nano`** salvo requisito explícito de t2.
 
 ---
 

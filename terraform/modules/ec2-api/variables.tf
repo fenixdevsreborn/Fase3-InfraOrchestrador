@@ -52,8 +52,11 @@ variable "target_port" {
 
 variable "instance_type" {
   type        = string
-  description = "Tipo da instância EC2 (ex.: t3.micro)."
-  default     = "t3.micro"
+  description = <<-EOT
+    Tipo EC2. Default t3.nano = menor custo burstable x86 na família t3 (2 vCPU compartilhados, 0,5 GiB RAM).
+    Atenção: imagem Postgres+.NET no mesmo container costuma precisar de mais RAM — use t3.micro (1 GiB) ou t3.small se houver OOM ou lentidão.
+  EOT
+  default     = "t3.nano"
 }
 
 variable "ami_id" {
@@ -69,6 +72,6 @@ variable "tags_base" {
 
 variable "root_volume_size" {
   type        = number
-  description = "Tamanho do volume raiz em GB."
-  default     = 20
+  description = "Tamanho do volume raiz em GB (gp3). Mínimo prático para Docker + imagens: 12–20."
+  default     = 12
 }

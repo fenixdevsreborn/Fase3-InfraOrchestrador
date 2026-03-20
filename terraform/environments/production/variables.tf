@@ -47,8 +47,11 @@ variable "github_oidc_repos" {
 
 variable "instance_type" {
   type        = string
-  description = "Tipo da instância EC2 (ex.: t3.micro)."
-  default     = "t3.micro"
+  description = <<-EOT
+    Tipo EC2 para as três APIs (usersapi, gamesapi, paymentsapi). Default t3.nano (menor custo típico x86).
+    Se Postgres+.NET no mesmo container OOM, suba para t3.micro ou t3.small.
+  EOT
+  default     = "t3.nano"
 }
 
 variable "alb_target_port" {
