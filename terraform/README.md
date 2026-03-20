@@ -34,6 +34,25 @@ terraform -chdir=terraform/environments/production apply -var-file=terraform.tfv
 - **GitHub Actions:** workflow **Terraform Destroy (manual)** — só `workflow_dispatch`, com confirmação `DESTROY` e opção de plan sem aplicar. Ver README raiz do repositório, seção *Destruir infraestrutura*.
 - **CLI:** `terraform plan -destroy` e `terraform destroy -var-file=terraform.tfvars` em `environments/production`.
 
+## Lock do state (`Error acquiring the state lock`)
+
+O backend S3 usa a tabela DynamoDB **`fcg-fenix-tfstate-lock`**. Um **apply/plan/destroy** interrompido (cancelamento no Actions, timeout, crash) pode deixar o lock **sem ser liberado**.
+
+1. **Confirme** que **nenhum** workflow Terraform está em execução no GitHub Actions (Apply, Destroy, Plan em outra PR).
+2. **Libere o lock** com a mesma pasta e credenciais que o CI usa:
+
+   ```bash
+   cd terraform/environments/production
+   terraform init
+   terraform force-unlock LOCK_ID
+   ```
+
+   Substitua `LOCK_ID` pelo UUID que aparece na mensagem de erro (ex.: `52ef7aef-6370-9fe0-2d18-e5f8567dd4dd`). O comando pede confirmação (`yes`).
+
+3. **Não** use `-lock=false` no CI — dois applies ao mesmo tempo corrompem o state.
+
+**Alternativa (console AWS):** DynamoDB → tabela `fcg-fenix-tfstate-lock` → localizar o item cujo `LockID` contém `production/terraform.tfstate` e apagar **só** se tiver certeza de que ninguém está rodando Terraform.
+
 ## Módulos
 
 - `vpc` — VPC, subnets, IGW, NAT, route tables

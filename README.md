@@ -202,6 +202,7 @@ O **Terraform Apply** e os deploys **não** removem a infra automaticamente. Par
 - **ECR:** o módulo usa `force_delete = true` para o destroy apagar repositórios mesmo com imagens (evita `RepositoryNotEmptyException`).
 - **ALB + API Gateway:** `module.api_gateway` usa `depends_on = [module.alb]` para, no destroy, remover VPC Link / NLB / registro do ALB antes de tocar no listener do ALB (evita `ResourceInUse` na porta 80).
 - Destroy **interrompido no meio:** rode de novo `plan -destroy` / destroy após atualizar o repositório; ou `terraform refresh` e limpeza manual no console se necessário.
+- **`Error acquiring the state lock`:** lock preso na DynamoDB (`fcg-fenix-tfstate-lock`) — confira se não há outro job Terraform rodando; depois `terraform force-unlock <LOCK_ID>` em `terraform/environments/production` (ver **`terraform/README.md`** → *Lock do state*).
 - Volumes/snapshots órfãos na AWS podem exigir revisão manual no console.
 
 #### Opção B — Máquina local (AWS CLI configurada)
