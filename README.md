@@ -4,7 +4,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 
 **Variáveis e configuração:** seção **13** (variáveis do GitHub por repositório) e **14** (variáveis nas EC2 e no Terraform), com passo a passo detalhado.
 
-**Testes funcionais (Postman):** seção **15** — login, criação de usuário, criação de jogos e fluxo de compra via API Gateway.
+**Testes funcionais (Postman):** seção **15** — login, criação de usuário, criação de jogos e fluxo de compra via API Gateway. **502 no gateway:** seção **15.0** (porta 80 na EC2, health `/health`, target healthy).
 
 **Ordem de provisionamento:** seção **2.2** (ordem completa, do zero até o deploy das APIs). **Bootstrap (backend remoto):** seção **2.1**.
 
@@ -860,6 +860,19 @@ Referência completa: `terraform/environments/production/terraform.tfvars.exampl
 ## 15. Testes com Postman (login, usuário, jogos e compra)
 
 Esta seção descreve como validar o fluxo ponta a ponta usando **Postman** contra a **URL pública do API Gateway** (HTTP API, stage `$default`, sem prefixo de stage no path).
+
+### 15.0 Erro **502 Bad Gateway** no API Gateway
+
+O gateway responde, mas o **ALB/EC2** não entrega HTTP válido ao integration. Checklist:
+
+| Verificação | O que fazer |
+|-------------|-------------|
+| **Porta na EC2** | O target group do Terraform usa **porta 80** na instância. No `docker-compose` da EC2 use **`"80:8080"`** (host 80 → container 8080), **não** só `8080:8080`. Corrija em `/opt/fcg-fenix/usersapi/docker-compose.yml`, `docker compose up -d`. Exemplos atualizados em `docs/ec2-examples/*/docker-compose.yml`. |
+| **Target saudável** | **EC2 → Target Groups** → `fcg-fenix-usersapi-tg` → aba **Targets**: estado deve ser **healthy**. Se **unhealthy**, o health check do ALB chama **`GET /health`** (após apply recente do Terraform). Confirme `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:80/health` **dentro da EC2**. |
+| **Container no ar** | `docker ps` na EC2; logs `docker logs ...`. Postgres+API (imagem `Dockerfile.postgres`) devem estar de pé. |
+| **Login** | Email errado gera **401**, não 502. No exemplo da FIAP costuma ser **`admin@fcg.local`** (não `fag.local`). |
+
+Depois de ajustar compose/porta ou Terraform (health em `/health`), rode **Terraform Apply** de novo se mudou só o código de infra, ou **só** `docker compose up -d` na EC2 se mudou só o mapeamento de porta.
 
 ### 15.1 Obter a base URL e configurar o Postman
 

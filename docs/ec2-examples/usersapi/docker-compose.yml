@@ -14,8 +14,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-fcg_users}
     volumes:
       - users_pgdata:/var/lib/postgresql/data
+    # ALB/target group do Terraform usam porta 80 na EC2 — mapear host 80 → container 8080.
     ports:
-      - "8080:8080"
+      - "80:8080"
     restart: unless-stopped
 
 volumes:

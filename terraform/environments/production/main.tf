@@ -89,6 +89,10 @@ module "alb" {
   path_prefix_to_service = local.alb_path_prefix_to_service
   target_port            = var.alb_target_port
   tags_base              = var.tags_base
+
+  # As APIs .NET não respondem 200 em "/"; health liveness em "/health" (evita target unhealthy → 502 no API Gateway).
+  health_check_path    = "/health"
+  health_check_matcher = "200"
 }
 
 module "ec2_usersapi" {

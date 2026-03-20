@@ -12,8 +12,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-fcg_payments}
     volumes:
       - payments_pgdata:/var/lib/postgresql/data
+    # ALB/target group usam porta 80 na EC2.
     ports:
-      - "8080:8080"
+      - "80:8080"
     restart: unless-stopped
 
 volumes:

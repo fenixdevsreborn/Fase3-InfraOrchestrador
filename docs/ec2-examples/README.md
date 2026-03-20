@@ -14,3 +14,7 @@ Estes arquivos são **modelos** para copiar em cada EC2 no path `/opt/fcg-fenix/
    - `.env` → copiar de `.env.example`, renomear para `.env` e preencher (principalmente senhas e ECR_REGISTRY)
    - `deploy.sh` → copiar de `usersapi/deploy.sh`, `chmod +x deploy.sh`
 3. O pipeline (SSM) atualiza `ECR_REGISTRY` e `IMAGE_TAG` no `.env` a cada deploy.
+
+## Porta 80 no host (evita 502 no API Gateway)
+
+O ALB envia tráfego para a **porta 80** da EC2. O `docker-compose` deve publicar **`80:8080`** (não `8080:8080`). Sem isso, os targets ficam unhealthy ou o gateway retorna **502 Bad Gateway**.
