@@ -371,7 +371,7 @@ O **SSM Session Manager** lista as instâncias por nome; escolha a que tiver o `
 Não é necessário IP público nem bastion para operar as instâncias:
 
 1. **Pré-requisitos (já cobertos pelo Terraform deste repo)**  
-   - Role da EC2 com **`AmazonSSMManagedInstanceCore`** (Session Manager + Run Command).  
+   - Role da EC2 com **`AmazonSSMManagedInstanceCore`** (Session Manager + Run Command) e **`CloudWatchAgentServerPolicy`** (logs/métricas do CloudWatch Agent).  
    - **Amazon Linux 2** com **SSM Agent** (já instalado).  
    - **Saída para a internet** (ex.: **NAT Gateway** na VPC) para o agente falar com os endpoints do Systems Manager na região. *Sem NAT*, seria preciso criar **VPC endpoints** de interface para SSM / EC2 Messages / SSMMessages.
 
