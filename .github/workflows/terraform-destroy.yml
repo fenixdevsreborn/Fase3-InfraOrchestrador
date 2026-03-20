@@ -38,6 +38,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
 
     steps:
+      # Checkout antes de qualquer step com working-directory = terraform/... (senão o diretório não existe no runner).
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Verificar confirmação
         run: |
           if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
@@ -45,9 +49,6 @@ jobs:
             exit 1
           fi
           echo "Confirmação OK."
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
