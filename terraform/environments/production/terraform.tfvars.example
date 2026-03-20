@@ -21,8 +21,8 @@ github_oidc_repos = [
   "fenixdevsreborn/Fase3-PaymentsAPI"
 ]
 
-# t3.nano = mais barato (0,5 GiB). API+Postgres no mesmo container: considere t3.micro se faltar RAM.
-instance_type   = "t3.nano"
+# t3.micro = default (Free Tier elegível). Se a conta NÃO tiver restrição Free Tier, t3.nano reduz custo (0,5 GiB — pode OOM com Postgres+.NET).
+instance_type   = "t3.micro"
 alb_target_port = 80
 
 # JWT no API Gateway (opcional). Default false = Apply nunca quebra por OIDC.

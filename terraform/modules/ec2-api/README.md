@@ -16,7 +16,7 @@ module "ec2_usersapi" {
   instance_profile_name  = module.iam_ec2_usersapi.instance_profile_name
   target_group_arn       = module.alb.target_group_arns["usersapi"]
   target_port            = 80
-  instance_type          = "t3.nano"
+  instance_type          = "t3.micro"
   tags_base              = var.tags_base
 }
 ```

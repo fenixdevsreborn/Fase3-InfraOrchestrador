@@ -53,10 +53,11 @@ variable "target_port" {
 variable "instance_type" {
   type        = string
   description = <<-EOT
-    Tipo EC2. Default t3.nano = menor custo burstable x86 na família t3 (2 vCPU compartilhados, 0,5 GiB RAM).
-    Atenção: imagem Postgres+.NET no mesmo container costuma precisar de mais RAM — use t3.micro (1 GiB) ou t3.small se houver OOM ou lentidão.
+    Tipo EC2. Default t3.micro = elegível ao Free Tier (contas com política "somente Free Tier" rejeitam t3.nano).
+    t3.nano é mais barato fora dessa restrição — defina em tfvars se sua conta permitir.
+    Postgres+.NET no mesmo container: prefira t3.micro+ ou t3.small se houver OOM.
   EOT
-  default     = "t3.nano"
+  default     = "t3.micro"
 }
 
 variable "ami_id" {

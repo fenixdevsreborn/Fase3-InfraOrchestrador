@@ -15,7 +15,7 @@ Manual de operação da infraestrutura e do pipeline de deploy do projeto FCG Fe
 - **Ambiente:** produção única; não se usa "prod" no nome dos recursos, apenas na tag `Environment`.
 - **Repositórios:** 1 repositório de infraestrutura (Terraform + workflows reutilizáveis) e 1 repositório por API: usersapi, gamesapi, paymentsapi.
 - **Entrada pública:** API Gateway HTTP API → VPC Link → ALB interno (privado) → target groups por path (`/users/*`, `/games/*`, `/payments/*`) → uma EC2 privada por serviço. **JWT authorizer** em `/games` e `/payments` é **opcional** (`api_gateway_jwt_authorizer_enabled`, default **false**): a AWS valida o OIDC na criação; ative só quando `{issuer}/.well-known/openid-configuration` estiver respondendo (ver README do módulo `api-gateway`). **/users** segue sem authorizer no edge quando o JWT do gateway está desligado. Webhook de pagamento tem rota pública dedicada (módulo `api-gateway`).
-- **Compute:** uma instância EC2 **privada** (sem IP público) por API (`fcg-fenix-usersapi-ec2`, etc.). Tipo padrão no Terraform: **`t3.nano`** (menor custo x86 burstable; se API+Postgres no mesmo container faltar RAM, use **`t3.micro`** em `instance_type`). **IMDSv2 obrigatório** (`http_tokens = required`) nas instâncias criadas/atualizadas pelo módulo EC2. Acesso administrativo: **SSM Session Manager** (sem SSH público). Em cada EC2 roda Docker com API .NET + PostgreSQL no mesmo container (`Dockerfile.postgres`).
+- **Compute:** uma instância EC2 **privada** (sem IP público) por API (`fcg-fenix-usersapi-ec2`, etc.). Tipo padrão no Terraform: **`t3.micro`** (elegível ao Free Tier; contas com política “somente Free Tier” **não** aceitam `t3.nano`). Para custo mínimo sem essa restrição, use `instance_type = "t3.nano"` no `terraform.tfvars`. **IMDSv2 obrigatório** no módulo EC2. Acesso: **SSM Session Manager**. Docker: API .NET + PostgreSQL no mesmo container (`Dockerfile.postgres`).
 - **Registry:** um repositório ECR por API (`fcg-fenix-{service}-ecr`).
 - **Deploy:** GitHub Actions faz build da imagem, push no ECR e chama o workflow reutilizável do repositório de infraestrutura, que executa deploy remoto na EC2 via **SSM Run Command** (login ECR, atualização de `.env`, `docker compose pull` e `up -d`).
 - **Autenticação AWS:** OIDC (GitHub Actions assume role IAM sem chaves estáticas).
@@ -386,8 +386,8 @@ Não é necessário IP público nem bastion para operar as instâncias:
 4. **“Gerenciado: falso” no console**  
    Às vezes o painel da instância ainda não mostra como gerenciada até o **SSM Agent** registrar (alguns minutos após o boot). Se após ~10 min continuar sem sessão, confira a role, o NAT e **Fleet Manager → Managed instances**.
 
-5. **Sobre “1 núcleo”**  
-   Na AWS, **`t3.nano`** é a opção burstable **mais barata** usual em x86; o spec lista **2 vCPU** compartilhados (créditos). Não há instância atual “nano” com 1 vCPU dedicado na família t3; **`t2.nano`** tem **1 vCPU** mas é geração antiga — prefira **`t3.nano`** salvo requisito explícito de t2.
+5. **Sobre “1 núcleo” e Free Tier**  
+   **`t3.micro`** (default) costuma ser o menor tipo **aceito** quando a conta/organização exige instâncias elegíveis ao Free Tier (`RunInstances` falha com `t3.nano` nesse caso). **`t3.nano`** é mais barato **se** a política da conta permitir. Especificação: t3 ainda lista **2 vCPU** burstable; **`t2.nano`** tem **1 vCPU** mas é legado.
 
 ---
 
