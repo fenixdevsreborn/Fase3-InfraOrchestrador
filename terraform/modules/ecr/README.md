@@ -2,6 +2,8 @@
 
 Um repositório ECR por serviço. Naming: `fcg-fenix-{service}-ecr`.
 
+**Destroy:** por padrão `force_delete = true` para `terraform destroy` remover o repositório mesmo com imagens.
+
 ## Uso
 
 ```hcl

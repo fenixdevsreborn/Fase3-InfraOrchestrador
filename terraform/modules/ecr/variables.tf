@@ -29,3 +29,9 @@ variable "encrypt_images" {
   description = "Habilitar criptografia nas imagens (KMS)."
   default     = false
 }
+
+variable "force_delete" {
+  type        = bool
+  description = "Se true, terraform destroy remove o repositório mesmo com imagens (DeleteRepository force)."
+  default     = true
+}

@@ -199,7 +199,10 @@ O **Terraform Apply** e os deploys **não** removem a infra automaticamente. Par
 
 - O workflow **não dispara em push**; só **manual**.
 - O **Bootstrap** (bucket S3 `fcg-fenix-tfstate` e tabela DynamoDB de lock) costuma **não** estar no mesmo state de `production`; após o destroy, o state no S3 pode ficar referenciando recursos já apagados — avalie limpar ou recriar backend conforme `terraform/README.md`.
-- Imagens no **ECR** são removidas se estiverem no state; volumes/snapshots órfãos na AWS podem exigir revisão manual no console.
+- **ECR:** o módulo usa `force_delete = true` para o destroy apagar repositórios mesmo com imagens (evita `RepositoryNotEmptyException`).
+- **ALB + API Gateway:** `module.api_gateway` usa `depends_on = [module.alb]` para, no destroy, remover VPC Link / NLB / registro do ALB antes de tocar no listener do ALB (evita `ResourceInUse` na porta 80).
+- Destroy **interrompido no meio:** rode de novo `plan -destroy` / destroy após atualizar o repositório; ou `terraform refresh` e limpeza manual no console se necessário.
+- Volumes/snapshots órfãos na AWS podem exigir revisão manual no console.
 
 #### Opção B — Máquina local (AWS CLI configurada)
 

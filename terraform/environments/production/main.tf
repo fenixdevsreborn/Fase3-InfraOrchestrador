@@ -167,4 +167,8 @@ module "api_gateway" {
   jwt_authorizer_enabled   = var.api_gateway_jwt_authorizer_enabled
   users_api_jwt_issuer     = var.users_api_jwt_issuer
   users_api_jwt_audience   = var.users_api_jwt_audience
+
+  # Destroy: sem isso, o listener do ALB pode ser removido em paralelo ao NLB que ainda registra o ALB como target
+  # (ResourceInUse na porta 80). depends_on no módulo garante destroy completo do api_gateway antes de qualquer recurso do alb.
+  depends_on = [module.alb]
 }

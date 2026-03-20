@@ -16,6 +16,8 @@ resource "aws_ecr_repository" "api" {
 
   name                 = "${local.name_prefix}-${each.key}-ecr"
   image_tag_mutability = var.image_tag_mutability
+  # Destroy: permite remover o repositório mesmo com imagens (evita RepositoryNotEmptyException).
+  force_delete         = var.force_delete
   image_scanning_configuration {
     scan_on_push = true
   }
